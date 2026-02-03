@@ -9,7 +9,7 @@ from typing import Annotated
 from fastapi import Body
 from pydantic import BaseModel, Field
 
-from cml_mcp.cml.simple_webserver.schemas.common import (
+from simple_webserver.schemas.common import (
     Coordinate,
     DefinitionID,
     Label,
