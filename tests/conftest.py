@@ -362,6 +362,7 @@ def pytest_configure(config):
     """Add custom markers."""
     config.addinivalue_line("markers", "live_only: mark test to run only against live CML server")
     config.addinivalue_line("markers", "mock_only: mark test to run only with mocks")
+    config.addinivalue_line("markers", "slow: mark test that runs more then 10s")
 
 
 def pytest_collection_modifyitems(config, items):
