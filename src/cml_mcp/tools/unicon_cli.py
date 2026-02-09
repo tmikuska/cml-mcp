@@ -12,7 +12,6 @@ _LOGGER = logging.getLogger(__name__)
 
 TERMWS_BINARY = "/usr/local/bin/termws"
 TIMEOUT = 300
-LOG_PATH = "/tmp/unicon_last_connection.log"
 
 
 def unicon_send_cli_command_sync(
@@ -71,13 +70,16 @@ def unicon_send_cli_command_sync(
         if connection is not None:
             connection.disconnect()
 
-        _save_connection_log(connection, error)
+        _save_connection_log(label, connection, error)
 
 
-def _save_connection_log(connection, error):
+def _save_connection_log(label, connection, error):
+    log_path = f"/tmp/unicon_{label}.log"
     try:
-        with open(LOG_PATH, "at") as logfile:
-            logfile.write("Start log of extraction: \n")
+        # "at" mode: Opens for appending (a) in text mode (t).
+        # It creates the file if it does not exist.
+        with open(log_path, "at") as logfile:
+            logfile.write(f"\n--- Start log of extraction for {label} ---\n")
             if error:
                 logfile.write("Failed with error:\n")
                 logfile.writelines(error.format())
@@ -85,5 +87,6 @@ def _save_connection_log(connection, error):
                 logfile.write(connection.log_buffer)
             else:
                 logfile.write("No connection log was retained\n")
+            logfile.write(f"--- End log ---\n")
     except Exception as exc:
-        _LOGGER.exception("Failed to save unicon connection log: %s", exc)
+        _LOGGER.exception("Failed to save unicon connection log for %s: %s", label, exc)
