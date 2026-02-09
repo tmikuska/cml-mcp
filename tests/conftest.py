@@ -385,6 +385,8 @@ async def created_lab(main_mcp_client: Client[FastMCPTransport]) -> AsyncGenerat
         title=title,
         description="This is a test lab created by MCP tests",
         notes="Some _markdown_ notes for the lab.",
+        autostart=LabAutostart(),
+        node_staging=NodeStaging(),
     )
 
     result = await main_mcp_client.call_tool(

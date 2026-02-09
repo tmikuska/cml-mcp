@@ -394,6 +394,7 @@ async def test_modify_cml_lab(
     assert mod_result.data is True
 
 
+# TODO: verify topology yaml to avoid Pydantic errors
 @pytest.mark.live_only
 async def test_full_cml_topology(main_mcp_client: Client[FastMCPTransport]):
     topo = Path(__file__).parent.joinpath("input_data/IOL_OSPF_Lab.yaml")
