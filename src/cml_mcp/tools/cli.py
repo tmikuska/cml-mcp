@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import tempfile
+from enum import StrEnum
 
 import httpx
 from fastmcp.exceptions import ToolError
@@ -19,9 +20,22 @@ from cml_mcp.cml.simple_webserver.schemas.common import UUID4Type
 from cml_mcp.cml.simple_webserver.schemas.nodes import NodeLabel
 from cml_mcp.cml_client import CMLClient
 from cml_mcp.tools.dependencies import _pyats_auth_pass, _pyats_password, _pyats_username, get_cml_client_dep
+from cml_mcp.tools.unicon_cli import unicon_send_cli_command_sync
 from cml_mcp.types import ConsoleLogOutput
 
+try:
+    from pyats.topology.loader.base import TestbedFileLoader as _PyatsTFLoader
+except ImportError:
+    _PyatsTFLoader = None
+
+
 logger = logging.getLogger("cml-mcp.tools.cli")
+
+
+class ConnectionType(StrEnum):
+    PYATS = "pyats"
+    UNICON = "unicon"
+    AUTO = "auto"
 
 
 def _send_cli_command_sync(
@@ -76,12 +90,6 @@ def _send_cli_command_sync(
         os.chdir(cwd)  # Restore the original working directory
 
 
-if os.environ.get("RUN_CONTROLLER"):
-    from cml_mcp.tools.unicon_cli import unicon_send_cli_command_sync
-
-    _send_cli_command_sync = unicon_send_cli_command_sync
-
-
 def register_tools(mcp):
     """Register all CLI and console tools with the FastMCP server."""
 
@@ -130,6 +138,7 @@ def register_tools(mcp):
         label: NodeLabel,  # pyright: ignore[reportInvalidTypeForm]
         commands: str,
         config_command: bool = False,
+        connection_type: ConnectionType = ConnectionType.AUTO,
     ) -> str:
         """
         Send CLI commands to running node by lab UUID and node label. Node must be in BOOTED state.
@@ -137,8 +146,18 @@ def register_tools(mcp):
         Separate multiple commands with newlines.
         config_command=false: exec/operational mode (default). config_command=true: config mode only
         (don't include "configure terminal" or "end").
-        Returns command output text. Requires PyATS/Genie libraries.
+        Returns command output text. Requires PyATS/Genie or Unicon libraries.
+        Unicon is installed as dependency for PyATS but can be installed separately.
+        doing so provides less overhead and saves disk space.
+        When PyATS/Genie are installed you can select how to establish connection
         """
+
+        logger.info(f"Sending CLI commands to node {label} using {connection_type}")
+
+        use_pyats = (connection_type == ConnectionType.PYATS) or (connection_type == ConnectionType.AUTO and _PyatsTFLoader)
+
+        exec_tool = _send_cli_command_sync if use_pyats else unicon_send_cli_command_sync
+
         client = get_cml_client_dep()
 
         # Verify vclient is available
@@ -150,7 +169,7 @@ def register_tools(mcp):
         # Use asyncio.to_thread to prevent blocking the event loop with synchronous operations
         # and to avoid os.chdir() race conditions between concurrent requests
         try:
-            output = await asyncio.to_thread(_send_cli_command_sync, client, lid, label, commands, config_command)
+            output = await asyncio.to_thread(exec_tool, client, lid, label, commands, config_command)
             return output
         except Exception as e:
             logger.error(f"Error sending CLI command '{commands}' to node {label} in lab {lid}: {str(e)}", exc_info=True)

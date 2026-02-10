@@ -8,7 +8,6 @@ from typing import Annotated
 
 from fastapi import Body
 from pydantic import BaseModel, Field
-
 from simple_webserver.schemas.common import (
     Coordinate,
     DefinitionID,
