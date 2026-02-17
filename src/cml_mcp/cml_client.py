@@ -67,7 +67,7 @@ class CMLClient(object):
 
         self.base_url = host.rstrip("/")
         self.api_base = f"{self.base_url}/api/v0"
-        self.vclient = virl2_client.ClientLibrary(host, username, password, ssl_verify=verify_ssl)
+        self.vclient = virl2_client.ClientLibrary(host, username, password, ssl_verify=verify_ssl, allow_http=True)
         self.client = httpx.AsyncClient(verify=verify_ssl, timeout=API_TIMEOUT)
 
     @property
