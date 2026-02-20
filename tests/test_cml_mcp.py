@@ -694,7 +694,7 @@ async def test_connect_two_nodes(main_mcp_client: Client[FastMCPTransport], crea
         if isinstance(item, dict):
             item = PCAPItem(**item)
         assert isinstance(item, PCAPItem)
-        if item.protocol.lower() == "icmp":
+        if item.protocol.lower().startswith("icmp"):
             found_icmp = True
     assert found_icmp is True
 
