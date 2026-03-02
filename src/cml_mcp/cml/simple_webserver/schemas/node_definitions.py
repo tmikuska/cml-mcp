@@ -15,9 +15,11 @@ from simple_webserver.schemas.common import (
     DeviceNature,
     DriverType,
     FilePath,
+    PyAtsCredentials,
+    PyAtsOs,
+    PyAtsToken,
 )
 from simple_webserver.schemas.nodes import NodeConfigurationContent, NodeParameters
-from simple_webserver.schemas.pyats import PyAtsCredentials, PyAtsModel, PyAtsOs
 
 
 class NicDriver(StrEnum):
@@ -176,7 +178,7 @@ class Interfaces(BaseModel, extra="forbid"):
         default=None, description="Default number of physical interfaces.", ge=1, le=64
     )
     iol_static_ethernets: Literal[0, 4, 8, 12, 16] = Field(
-        default=None,
+        default=0,
         description="Only for IOL nodes, the number of static Ethernet interfaces"
         " preceding any serial interface; default 0 means "
         "all interfaces are Ethernet.",
@@ -450,13 +452,11 @@ class Inherited(BaseModel, extra="forbid"):
 
 class PyAts(PyAtsCredentials, extra="forbid"):
     os: PyAtsOs = Field(...)
-    series: str = Field(
+    series: PyAtsToken = Field(
         default=None,
-        description="The device series as defined by pyATS / Unicon.",
-        min_length=1,
-        max_length=32,
+        description="The device platform token as defined by pyATS / Unicon.",
     )
-    model: PyAtsModel = Field(default=None)
+    model: PyAtsToken = Field(default=None)
     use_in_testbed: bool = Field(
         default=True, description="Use this device in an exported testbed?"
     )

@@ -78,6 +78,10 @@ class DomainDriver(StrEnum):
         return self is DomainDriver.IOL
 
     @property
+    def is_iol_or_docker(self) -> bool:
+        return self is DomainDriver.IOL or self is DomainDriver.DOCKER
+
+    @property
     def is_kvm_or_docker(self) -> bool:
         return self is DomainDriver.KVM or self is DomainDriver.DOCKER
 
@@ -125,11 +129,15 @@ class NodeState(FSMState):
     DISCONNECTED = "DISCONNECTED"
 
     @property
+    def is_started(self) -> bool:
+        return self is NodeState.BOOTED or self is NodeState.STARTED
+
+    @property
     def is_starting(self) -> bool:
         return (
-            self is NodeState.QUEUED
+            self is NodeState.BOOTED
+            or self is NodeState.QUEUED
             or self is NodeState.STARTED
-            or self is NodeState.BOOTED
         )
 
 

@@ -63,18 +63,14 @@ LabDescription = Annotated[
 ]
 
 
-class LabGroupBase(BaseModel):
+class GroupLab(BaseModel, extra="forbid"):
     id: UUID4Type = Field(..., description="ID of the lab group.")
     permission: OldPermission = Field(
         ..., description="Permission level for the lab group."
     )
 
 
-class GroupLab(LabGroupBase, extra="forbid"):
-    pass
-
-
-class LabGroup(LabGroupBase, extra="forbid"):
+class LabGroup(GroupLab, extra="forbid"):
     name: str = Field(default=None, description="Name of the lab group.")
 
 
@@ -120,17 +116,18 @@ class LabAutostart(BaseModel, extra="forbid"):
 
 
 LabAutostartMixin = Annotated[
-    # XXX: This is only set to None for CML 2.9 backward compatibility.
-    LabAutostart | None,
+    LabAutostart,
     Field(
-        default=None,
-        description="The lab's autostart configuration. (Since: 2.10)",
+        default_factory=dict,
+        description="The lab's autostart configuration.",
     ),
 ]
 
 
 class NodeStaging(BaseModel, extra="forbid"):
-    enabled: bool = Field(default=False, description="Whether the node staging is enabled.")
+    enabled: bool = Field(
+        default=False, description="Whether the node staging is enabled."
+    )
     start_remaining: bool = Field(
         default=True,
         description="Whether nodes with unset priority should be started.",
@@ -144,9 +141,8 @@ class NodeStaging(BaseModel, extra="forbid"):
 
 
 NodeStagingMixin = Annotated[
-    # XXX: This is only set to None for CML 2.9 backward compatibility.
-    NodeStaging | None,
-    Field(default=None, description="The lab's node staging configuration. (Since: 2.10)"),
+    NodeStaging,
+    Field(default_factory=dict, description="The lab's node staging configuration."),
 ]
 
 
@@ -194,8 +190,14 @@ class Lab(BaseDBModel, extra="forbid"):
         description="Array of LabGroup objects - mapping from group ID to permissions.",
     )
     effective_permissions: EffectivePermissions = Field(...)
-    autostart: LabAutostartMixin = Field(default=...)
-    node_staging: NodeStagingMixin = Field(default=...)
+    autostart: LabAutostartMixin = Field(...)
+    node_staging: NodeStagingMixin = Field(...)
+
+
+class LabResponse(Lab, extra="forbid"):
+    """The response body is a JSON lab object."""
+
+    pass
 
 
 LabGroupsBody = Annotated[
@@ -206,12 +208,6 @@ LabGroupsBody = Annotated[
 ]
 
 LabBody = Annotated[LabRequest, Body(description="The lab's data.")]
-
-
-class LabResponse(Lab, extra="forbid"):
-    """The response body is a JSON lab object."""
-
-    pass
 
 
 class LabElementStateResponse(BaseModel, extra="forbid"):
@@ -233,26 +229,23 @@ class LinkStats(BaseModel, extra="forbid"):
     drops: int = Field(default=0, description="Number of packets dropped.")
 
 
-class NodeTimesBase(BaseModel):
+class NodeTimes(BaseModel, extra="forbid"):
     times: dict[NodeStateModel, int] = Field(
         default_factory=dict,
         description="Timestamps for states QUEUED, STARTED, BOOTED.",
     )
 
 
-class NodeTimes(NodeTimesBase, extra="forbid"):
-    pass
-
-
-class NodeStats(NodeTimesBase, extra="forbid"):
+class NodeStats(NodeTimes, extra="forbid"):
     cpu_usage: float = Field(default=0.0, description="CPU usage in percent.")
     ram_usage: float = Field(default=0.0, description="RAM usage in percent.")
     disk_usage: int = Field(default=0, description="Disk usage in MB.")
     block0_wr_bytes: int = Field(default=0, description="Number of bytes written.")
     block0_rd_bytes: int = Field(default=0, description="Number of bytes read.")
-    cpu_limit: CpuLimit = Field(...)
-    cpus: AllocatedCpus = Field(...)
-    ram: Ram = Field(...)
+    cpu_limit: CpuLimit = Field(default=None)
+    cpus: AllocatedCpus = Field(default=None)
+    ram: Ram = Field(default=None)
+    is_running: bool = Field(default=False, description="Whether the node is running.")
 
 
 class LabSimulationStatsResponse(BaseModel, extra="forbid"):
