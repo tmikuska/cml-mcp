@@ -169,13 +169,13 @@ class Interfaces(BaseModel, extra="forbid"):
         ..., description="Has `loopback0` interface (used with ANK)."
     )
     min_count: int = Field(
-        default=None,
+        default=0,
         description="Minimal number of physical interfaces needed to start a node.",
         ge=0,
         le=64,
     )
     default_count: int = Field(
-        default=None, description="Default number of physical interfaces.", ge=1, le=64
+        default=1, description="Default number of physical interfaces.", ge=1, le=64
     )
     iol_static_ethernets: Literal[0, 4, 8, 12, 16] = Field(
         default=0,
