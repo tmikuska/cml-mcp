@@ -30,7 +30,7 @@ import httpx
 import virl2_client
 
 API_TIMEOUT = 10  # seconds
-MCP_CLIENT_IDENTIFIER = "cml_mcp"
+MCP_CLIENT_IDENTIFIER = "CmlMCP"
 
 # Set up logging for this module only
 logger = logging.getLogger("cml-mcp.cml_client")
