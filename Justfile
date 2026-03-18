@@ -18,6 +18,13 @@ build:
     uv build
     docker buildx build --platform linux/amd64,linux/arm64 -t xorrkaz/cml-mcp:latest -t xorrkaz/cml-mcp:$(uv version --short) .
 
+# Build wheel for CML packaging (no build-time patching needed;
+# the import hook in __init__.py redirects to real CML packages at runtime).
+[group('build')]
+build-cml wheelhouse='../wheelhouse':
+    uv build --wheel
+    mv dist/*.whl {{wheelhouse}}/
+
 # Update dependencies
 [group('lifecycle')]
 update:

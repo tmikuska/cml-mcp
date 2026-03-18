@@ -73,7 +73,8 @@ class CMLClient(object):
             username,
             password,
             ssl_verify=verify_ssl,
-            client_type=MCP_CLIENT_IDENTIFIER
+            allow_http=True,
+            client_type=MCP_CLIENT_IDENTIFIER,
         )
         self.client = httpx.AsyncClient(verify=verify_ssl, timeout=API_TIMEOUT)
         self.client.headers.update({"X-CML-CLIENT": MCP_CLIENT_IDENTIFIER})

@@ -22,14 +22,69 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 
+import importlib
+import importlib.abc
+import importlib.machinery
+import importlib.util
 import sys
 from pathlib import Path
 
-from cml_mcp.settings import settings
-
-# Add the cml directory to sys.path to allow relative imports within the CML schemas
 _cml_path = Path(__file__).parent / "cml"
-if str(_cml_path) not in sys.path:
-    sys.path.insert(0, str(_cml_path))
+
+# Detect whether real CML packages (simple_common, simple_webserver) are installed
+# in the environment. This check runs BEFORE we potentially add bundled schemas to
+# sys.path, so find_spec only finds the real packages when they are truly installed.
+_HAS_CML_PACKAGES = importlib.util.find_spec("simple_common") is not None and importlib.util.find_spec("simple_webserver") is not None
+
+
+class _SchemaAliasLoader(importlib.abc.Loader):
+    """Loads a module by importing its real CML counterpart and copying its namespace."""
+
+    def __init__(self, real_name: str) -> None:
+        self._real_name = real_name
+
+    def create_module(self, spec):
+        return None
+
+    def exec_module(self, module):
+        real_mod = importlib.import_module(self._real_name)
+        module.__dict__.update(real_mod.__dict__)
+        if hasattr(real_mod, "__path__"):
+            module.__path__ = list(real_mod.__path__)
+
+
+class _CMLSchemaFinder(importlib.abc.MetaPathFinder):
+    """Redirect cml_mcp.cml.{simple_common,simple_webserver} to real installed packages.
+
+    When cml-mcp is installed inside a CML environment that already has the real
+    simple_common and simple_webserver packages, this finder intercepts imports of
+    the bundled copies (under cml_mcp.cml.*) and transparently redirects them to
+    the real packages. This eliminates the need for build-time import rewriting.
+    """
+
+    _REDIRECTS = {
+        "cml_mcp.cml.simple_common": "simple_common",
+        "cml_mcp.cml.simple_webserver": "simple_webserver",
+    }
+
+    def find_spec(self, fullname, path, target=None):
+        for prefix, real_prefix in self._REDIRECTS.items():
+            if fullname == prefix or fullname.startswith(prefix + "."):
+                real_name = real_prefix + fullname[len(prefix):]
+                return importlib.machinery.ModuleSpec(fullname, _SchemaAliasLoader(real_name))
+        return None
+
+
+if _HAS_CML_PACKAGES:
+    sys.meta_path.insert(0, _CMLSchemaFinder())
+else:
+    # Standalone mode: add the bundled schemas directory to sys.path so that
+    # internal cross-references (e.g. "from simple_webserver.schemas.X import Y"
+    # inside the bundled schema files) resolve correctly.
+    if str(_cml_path) not in sys.path:
+        sys.path.insert(0, str(_cml_path))
+
+
+from cml_mcp.settings import settings  # noqa: E402
 
 __all__ = ["settings"]
