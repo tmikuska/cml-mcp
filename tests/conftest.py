@@ -7,6 +7,7 @@ Set the USE_MOCKS environment variable to control the behavior:
 - USE_MOCKS=false: Run against a live CML server
 """
 
+import base64
 import json
 import os
 from collections.abc import AsyncGenerator
@@ -19,6 +20,7 @@ from fastmcp.client import Client
 from fastmcp.client.transports import FastMCPTransport
 from mcp.types import TextContent
 
+from cml_mcp import settings
 from cml_mcp.cml.simple_webserver.schemas.common import UUID4Type
 from cml_mcp.cml.simple_webserver.schemas.labs import LabRequest, LabTitle, LabAutostart, NodeStaging
 COMMON_TEST_LAB_TITLE = LabTitle("MCP Test Lab")
