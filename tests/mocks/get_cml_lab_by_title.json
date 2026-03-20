@@ -17,5 +17,7 @@
     "lab_admin",
     "lab_exec",
     "lab_edit"
-  ]
+  ],
+  "autostart": {},
+  "node_staging": {}
 }
