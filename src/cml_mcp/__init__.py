@@ -44,6 +44,16 @@ class _SchemaAliasLoader(importlib.abc.Loader):
             module.__path__ = list(real_mod.__path__)
 
 
+class _NamespaceLoader(importlib.abc.Loader):
+    """Creates an empty namespace package for cml_mcp.cml."""
+
+    def create_module(self, spec):
+        return None
+
+    def exec_module(self, module):
+        module.__path__ = []
+
+
 class _CMLSchemaFinder(importlib.abc.MetaPathFinder):
     """Redirect cml_mcp.cml.{simple_common,simple_webserver} to real installed packages.
 
@@ -53,12 +63,17 @@ class _CMLSchemaFinder(importlib.abc.MetaPathFinder):
     redirects them to the real packages.
     """
 
+    _NAMESPACE = "cml_mcp.cml"
     _REDIRECTS = {
         "cml_mcp.cml.simple_common": "simple_common",
         "cml_mcp.cml.simple_webserver": "simple_webserver",
     }
 
     def find_spec(self, fullname, path, target=None):
+        if fullname == self._NAMESPACE:
+            return importlib.machinery.ModuleSpec(
+                fullname, _NamespaceLoader(), is_package=True
+            )
         for prefix, real_prefix in self._REDIRECTS.items():
             if fullname == prefix or fullname.startswith(prefix + "."):
                 real_name = real_prefix + fullname[len(prefix):]
