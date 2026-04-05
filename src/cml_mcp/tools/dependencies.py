@@ -57,7 +57,7 @@ else:
     cml_client = None  # type: ignore[assignment]
     cml_client_cache = ThreadSafeCache(
         ttl=settings.cml_session_ttl
-    )  # Cache for storing clients in HTTP mode, keyed by user, password and CML URL
+    )  # Cache for storing clients in HTTP mode, keyed by user, CML URL, and verify_ssl
 
 
 # Context variable to store request-scoped client for HTTP transport

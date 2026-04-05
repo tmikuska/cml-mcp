@@ -27,7 +27,6 @@ Middleware module for HTTP request handling and ACL management.
 """
 
 import base64
-import hashlib
 import logging
 import re
 from pathlib import Path
@@ -266,10 +265,8 @@ class CustomHttpRequestMiddleware(Middleware):
                     logger.warning("Request rejected: failed to decode X-PyATS-Enable credentials")
                     raise McpError(ErrorData(message="Failed to decode Basic authentication credentials for PyATS Enable", code=-31002))
 
-        # Look for the user's client in the cache.
-        # Hash the password so it never appears in log output or dict keys.
-        pwd_hash = hashlib.sha256(password.encode()).hexdigest()
-        client_cache_key = f"{username}:{pwd_hash}:{cml_url}"
+        # Look for the user's client in the cache (per user, CML URL, and TLS verify flag).
+        client_cache_key = f"{username}:{cml_url}:{verify_ssl!r}"
         request_client = await cml_client_cache.get(client_cache_key)
         if not request_client:
             # Create a new client for this request.
