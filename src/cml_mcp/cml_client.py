@@ -27,7 +27,6 @@ import os
 from typing import Any
 
 import httpx
-import virl2_client
 
 API_TIMEOUT = 10  # seconds
 MCP_CLIENT_IDENTIFIER = "CmlMCP"
@@ -68,7 +67,6 @@ class CMLClient(object):
 
         self.base_url = host.rstrip("/")
         self.api_base = f"{self.base_url}/api/v0"
-        self.vclient = virl2_client.ClientLibrary(host, username, password, ssl_verify=verify_ssl, client_type=MCP_CLIENT_IDENTIFIER)
         self.client = httpx.AsyncClient(verify=verify_ssl, timeout=API_TIMEOUT)
         self.client.headers.update({"X-CML-CLIENT": MCP_CLIENT_IDENTIFIER})
 

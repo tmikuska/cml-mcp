@@ -6,66 +6,82 @@ CLI command and console log tools for CML MCP server.
 """
 
 import asyncio
+import io
 import logging
 import os
 import re
-import tempfile
 
 import httpx
 from fastmcp.exceptions import ToolError
-from virl2_client.models.cl_pyats import ClPyats, PyatsNotInstalled
 
 from cml_mcp.cml.simple_webserver.schemas.common import UUID4Type
 from cml_mcp.cml.simple_webserver.schemas.nodes import NodeLabel
-from cml_mcp.cml_client import CMLClient
 from cml_mcp.tools.dependencies import _pyats_auth_pass, _pyats_password, _pyats_username, get_cml_client_dep
 from cml_mcp.types import ConsoleLogOutput
 
+try:
+    from pyats.topology.loader.base import TestbedFileLoader as _PyatsTFLoader
+    from pyats.topology.loader.markup import TestbedMarkupProcessor as _PyatsTMProcessor
+except ImportError:
+    _PyatsTFLoader = None
+    _PyatsTMProcessor = None
+
 logger = logging.getLogger("cml-mcp.tools.cli")
+
+_DEFAULT_SSH_OPTIONS = "-o IdentitiesOnly=yes -o IdentityAgent=none"
 
 
 def _send_cli_command_sync(
-    client: CMLClient,
-    lid: UUID4Type,
-    label: NodeLabel,  # pyright: ignore[reportInvalidTypeForm]
+    testbed_yaml: str,
+    username: str,
+    password: str,
+    label: str,
     commands: str,
     config_command: bool,
+    pyats_username: str | None = None,
+    pyats_password: str | None = None,
+    pyats_auth_pass: str | None = None,
 ) -> str:
     """
     Synchronous helper for send_cli_command to isolate blocking operations in a thread.
-    This prevents os.chdir() race conditions and event loop blocking.
+    Loads a PyATS testbed from server-provided YAML and executes commands directly.
     """
-    cwd = os.getcwd()  # Save the current working directory
-    try:
-        os.chdir(tempfile.gettempdir())  # Change to a writable directory (required by pyATS/ClPyats)
-        lab = client.vclient.join_existing_lab(str(lid))  # Join the existing lab using the provided lab ID
-        try:
-            pylab = ClPyats(lab)  # Create a ClPyats object for interacting with the lab
-            pylab.sync_testbed(client.vclient.username, client.vclient.password)  # Sync the testbed with CML credentials
+    loader = _PyatsTFLoader(
+        markupprocessor=_PyatsTMProcessor(
+            reference=True,
+            callable=False,
+            env_var=False,
+            include_file=False,
+            ask=False,
+            encode=False,
+            cli_var=False,
+            extend_list=False,
+        ),
+        enable_extensions=False,
+    )
+    testbed = loader.load(io.StringIO(testbed_yaml))
 
-            # Set the credentials for all devices other than the Terminal Server
-            # For HTTP transport: use contextvars (request-scoped, prevents race conditions)
-            # For stdio transport: fall back to environment variables
-            for device in pylab._testbed.devices.values():
-                if device.name != "terminal_server":
-                    device.credentials.default.username = _pyats_username.get() or os.getenv("PYATS_USERNAME", "cisco")
-                    device.credentials.default.password = _pyats_password.get() or os.getenv("PYATS_PASSWORD", "cisco")
-                    device.credentials.enable.password = (
-                        _pyats_auth_pass.get() or os.getenv("PYATS_AUTH_PASS") or device.credentials.default.password
-                    )
+    terminal = testbed.devices.terminal_server
+    terminal.credentials.default.username = username
+    terminal.credentials.default.password = password
+    terminal.connections.cli.ssh_options = _DEFAULT_SSH_OPTIONS
 
-        except PyatsNotInstalled:
-            raise ImportError(
-                "PyATS and Genie are required to send commands to running devices.  See the documentation on how to install them."
+    for device in testbed.devices.values():
+        if device.name != "terminal_server":
+            device.credentials.default.username = pyats_username or os.getenv("PYATS_USERNAME", "cisco")
+            device.credentials.default.password = pyats_password or os.getenv("PYATS_PASSWORD", "cisco")
+            device.credentials.enable.password = (
+                pyats_auth_pass or os.getenv("PYATS_AUTH_PASS") or device.credentials.default.password
             )
-        if config_command:
-            # Send the command as a configuration command
-            results = pylab.run_config_command(str(label), commands)
-        else:
-            # Send the command as an exec/operational command
-            results = pylab.run_command(str(label), commands)
 
-        # Genie may return dict output where the key is the command and the value is its output.
+    pyats_device = testbed.devices[label]
+    pyats_device.connect(logfile=os.devnull, log_stdout=False, learn_hostname=True)
+    try:
+        if config_command:
+            results = pyats_device.configure(commands, log_stdout=False)
+        else:
+            results = pyats_device.execute(commands, log_stdout=False)
+
         if isinstance(results, dict):
             output = ""
             for cmd, cmd_output in results.items():
@@ -75,7 +91,7 @@ def _send_cli_command_sync(
 
         return output
     finally:
-        os.chdir(cwd)  # Restore the original working directory
+        pyats_device.destroy()
 
 
 def register_tools(mcp):
@@ -136,16 +152,28 @@ def register_tools(mcp):
         """
         client = get_cml_client_dep()
 
-        # Verify vclient is available
-        if client.vclient is None:
+        if _PyatsTFLoader is None:
             raise ToolError(
-                "PyATS CLI commands require the virl2_client library. Ensure the CML client was initialized with valid credentials."
+                "PyATS and Genie are required to send commands to running devices. "
+                "Install with: pip install 'cml-mcp[pyats]'"
             )
 
-        # Use asyncio.to_thread to prevent blocking the event loop with synchronous operations
-        # and to avoid os.chdir() race conditions between concurrent requests
         try:
-            output = await asyncio.to_thread(_send_cli_command_sync, client, lid, label, commands, config_command)
+            testbed_raw = await client.get(f"/labs/{lid}/pyats_testbed", is_binary=True)
+            testbed_yaml = testbed_raw.decode("utf-8")
+
+            output = await asyncio.to_thread(
+                _send_cli_command_sync,
+                testbed_yaml,
+                client.username,
+                client.password,
+                str(label),
+                commands,
+                config_command,
+                _pyats_username.get(),
+                _pyats_password.get(),
+                _pyats_auth_pass.get(),
+            )
             return output
         except Exception as e:
             logger.error(f"Error sending CLI command '{commands}' to node {label} in lab {lid}: {str(e)}", exc_info=True)

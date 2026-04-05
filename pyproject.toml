@@ -21,7 +21,6 @@ dependencies = [
     "fastapi",
     "pydantic_strict_partial",
     "typer",
-    "virl2_client",
 ]
 optional-dependencies = { "pyats" = [
     "pyats",
