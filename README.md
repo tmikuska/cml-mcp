@@ -228,8 +228,7 @@ If you're using a self-signed certificate on your CML server, set `CML_VERIFY_SS
 #### PyATS command execution fails
 
 1. Ensure PyATS is installed with `cml-mcp[pyats]`
-2. Verify `PYATS_USERNAME`, `PYATS_PASSWORD`, and `PYATS_AUTH_PASS` are set correctly
-3. On Windows, use WSL or Docker for PyATS support
+2. On Windows, use WSL or Docker for PyATS support
 
 For more troubleshooting help, see [INSTALLATION.md](https://github.com/xorrkaz/cml-mcp/blob/main/INSTALLATION.md).
 

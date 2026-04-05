@@ -188,20 +188,12 @@ class CustomHttpRequestMiddleware(Middleware):
     async def on_request(self, context: MiddlewareContext, call_next) -> Any:
         # Import here to avoid circular dependency
         from cml_mcp.tools.dependencies import (
-            _pyats_auth_pass,
-            _pyats_password,
-            _pyats_username,
             _request_client,
             cml_client_cache,
         )
 
-        # Reset PyATS contextvars for this request
-        _pyats_username.set(None)
-        _pyats_password.set(None)
-        _pyats_auth_pass.set(None)
-
         headers = get_http_headers(
-            include={"x-cml-server-url", "x-cml-verify-ssl", "x-authorization", "x-pyats-authorization", "x-pyats-enable"}
+            include={"x-cml-server-url", "x-cml-verify-ssl", "x-authorization"}
         )
         cml_url = headers.get("x-cml-server-url")
         if not cml_url:
@@ -235,35 +227,6 @@ class CustomHttpRequestMiddleware(Middleware):
         except Exception:
             logger.warning("Request rejected: failed to decode X-Authorization credentials")
             raise McpError(ErrorData(message="Failed to decode Basic authentication credentials", code=-31002))
-        pyats_header = headers.get("x-pyats-authorization")
-        if pyats_header and pyats_header.startswith("Basic "):
-            pyats_parts = pyats_header.split(" ", 1)
-            if len(pyats_parts) != 2 or pyats_parts[0].lower() != "basic":
-                logger.warning("Request rejected: malformed X-PyATS-Authorization header")
-                raise McpError(
-                    ErrorData(message="Invalid X-PyATS-Authorization header format. Expected 'Basic <credentials>'", code=-31001)
-                )
-            try:
-                pyats_decoded = base64.b64decode(pyats_parts[1]).decode("utf-8")
-                pyats_username, pyats_password = pyats_decoded.split(":", 1)
-                _pyats_username.set(pyats_username)
-                _pyats_password.set(pyats_password)
-            except Exception:
-                logger.warning("Request rejected: failed to decode X-PyATS-Authorization credentials")
-                raise McpError(ErrorData(message="Failed to decode Basic authentication credentials for PyATS", code=-31002))
-            pyats_enable_header = headers.get("x-pyats-enable")
-            if pyats_enable_header and pyats_enable_header.startswith("Basic "):
-                pyats_enable_parts = pyats_enable_header.split(" ", 1)
-                if len(pyats_enable_parts) != 2 or pyats_enable_parts[0].lower() != "basic":
-                    logger.warning("Request rejected: malformed X-PyATS-Enable header")
-                    raise McpError(ErrorData(message="Invalid X-PyATS-Enable header format. Expected 'Basic <credentials>'", code=-31001))
-                try:
-                    pyats_enable_decoded = base64.b64decode(pyats_enable_parts[1]).decode("utf-8")
-                    pyats_enable_password = pyats_enable_decoded
-                    _pyats_auth_pass.set(pyats_enable_password)
-                except Exception:
-                    logger.warning("Request rejected: failed to decode X-PyATS-Enable credentials")
-                    raise McpError(ErrorData(message="Failed to decode Basic authentication credentials for PyATS Enable", code=-31002))
 
         # Look for the user's client in the cache (per user, CML URL, and TLS verify flag).
         client_cache_key = f"{username}:{cml_url}:{verify_ssl!r}"

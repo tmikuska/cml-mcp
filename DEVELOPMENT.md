@@ -51,10 +51,6 @@ This guide covers how to set up a development environment and contribute to the 
     CML_PASSWORD=your_password
     CML_VERIFY_SSL=false
     DEBUG=true
-    # Optional for CLI command support
-    PYATS_USERNAME=device_username
-    PYATS_PASSWORD=device_password
-    PYATS_AUTH_PASS=enable_password
     ```
 
 ## Development Tasks

@@ -123,29 +123,11 @@ This configuration gives you most features and works on any platform (Linux, Mac
         "CML_USERNAME": "<USERNAME_ON_CML_SERVER>",
         "CML_PASSWORD": "<PASSWORD_ON_CML_SERVER>",
         "CML_VERIFY_SSL": "false",
-        "PYATS_USERNAME": "<DEVICE_USERNAME>",
-        "PYATS_PASSWORD": "<DEVICE_PASSWORD>",
-        "PYATS_AUTH_PASS": "<DEVICE_ENABLE_PASSWORD>",
         "DEBUG": "false"
       }
     }
   }
 }
-```
-
-**Understanding PyATS credentials:**
-
-- `PYATS_USERNAME` and `PYATS_PASSWORD`: The username/password to log into your network devices (not your CML credentials)
-- `PYATS_AUTH_PASS`: The enable password for privileged EXEC mode on your devices
-- These are typically the credentials you configured in your device startup configs
-
-**Tip for new users:** If you haven't set up device credentials yet, common defaults in lab environments are:
-
-- Username: `admin` or `cisco`
-- Password: `cisco` or `C1sco12345`
-- Enable: same as password or leave blank if no enable secret is configured
-
-**Note:** `PYATS_AUTH_PASS` is optional. If omitted, it falls back to the value of `PYATS_PASSWORD`.
 
 #### With CLI Command Support (Windows/WSL)
 
@@ -164,12 +146,9 @@ Windows users wanting CLI command support should use WSL:
         "CML_URL": "<URL_OF_CML_SERVER>",
         "CML_USERNAME": "<USERNAME_ON_CML_SERVER>",
         "CML_PASSWORD": "<PASSWORD_ON_CML_SERVER>",
-        "PYATS_USERNAME": "<DEVICE_USERNAME>",
-        "PYATS_PASSWORD": "<DEVICE_PASSWORD>",
-        "PYATS_AUTH_PASS": "<DEVICE_ENABLE_PASSWORD>",
         "CML_VERIFY_SSL": "false",
         "DEBUG": "false",
-        "WSLENV": "CML_URL/u:CML_USERNAME/u:CML_PASSWORD/u:CML_VERIFY_SSL/u:PYATS_USERNAME/u:PYATS_PASSWORD/u:PYATS_AUTH_PASS/u:DEBUG/u"
+        "WSLENV": "CML_URL/u:CML_USERNAME/u:CML_PASSWORD/u:CML_VERIFY_SSL/u:DEBUG/u"
       }
     }
   }
@@ -198,12 +177,6 @@ For any platform using Docker:
         "-e",
         "CML_PASSWORD",
         "-e",
-        "PYATS_USERNAME",
-        "-e",
-        "PYATS_PASSWORD",
-        "-e",
-        "PYATS_AUTH_PASS",
-        "-e",
         "CML_VERIFY_SSL",
         "-e",
         "DEBUG",
@@ -214,9 +187,6 @@ For any platform using Docker:
         "CML_USERNAME": "<USERNAME_ON_CML_SERVER>",
         "CML_PASSWORD": "<PASSWORD_ON_CML_SERVER>",
         "CML_VERIFY_SSL": "false",
-        "PYATS_USERNAME": "<DEVICE_USERNAME>",
-        "PYATS_PASSWORD": "<DEVICE_PASSWORD>",
-        "PYATS_AUTH_PASS": "<DEVICE_ENABLE_PASSWORD>",
         "DEBUG": "false"
       }
     }
@@ -245,10 +215,6 @@ An alternative is to use FastMCP CLI to install the server into your favorite cl
     CML_PASSWORD=<PASSWORD_ON_CML_SERVER>
     CML_VERIFY_SSL=false  # Set to true to verify SSL certificates
     DEBUG=false  # Set to true to enable debug logging
-    # Optional in order to run commands
-    PYATS_USERNAME=<DEVICE_USERNAME>
-    PYATS_PASSWORD=<DEVICE_PASSWORD>
-    PYATS_AUTH_PASS=<DEVICE_ENABLE_PASSWORD>
     ```
 
 4. Run the FastMCP CLI command to install the server. For example:
@@ -354,19 +320,14 @@ The server will start and listen for plain HTTP connections at `http://0.0.0.0:9
 **What you need to know:**
 
 - **CML Credentials**: Instead of being set via environment variables (`CML_USERNAME`/`CML_PASSWORD`), CML credentials are provided via the `X-Authorization` HTTP header using Basic authentication format.
-- **PyATS Credentials**: For CLI command execution, PyATS credentials can be provided via the `X-PyATS-Authorization` header (Basic auth) instead of `PYATS_USERNAME`/`PYATS_PASSWORD` environment variables, and the enable password via the `X-PyATS-Enable` header instead of `PYATS_AUTH_PASS`.
 - **Multiple CML Hosts**: When running in HTTP mode, clients can connect to different CML servers by providing the `X-CML-URL` header. For security, you must configure allowed URLs via the `CML_ALLOWED_URLS` environment variable (comma-separated list) or `CML_URL_PATTERN` (regex pattern).
 
 Example headers:
 
 ```http
 X-Authorization: Basic <base64_encoded_cml_username:cml_password>
-X-PyATS-Authorization: Basic <base64_encoded_device_username:device_password>
-X-PyATS-Enable: <base64_encoded_enable_password>
 X-CML-URL: https://cml-server.example.com
 ```
-
-**Note:** The `X-PyATS-Enable` header only needs the Base64-encoded enable password (not Basic auth format with username:password).
 
 ### Configuring MCP Clients
 
@@ -389,12 +350,6 @@ X-CML-URL: https://cml-server.example.com
 ```sh
 # For CML credentials (X-Authorization header)
 echo -n "username:password" | base64
-
-# For device credentials (X-PyATS-Authorization header)
-echo -n "device_username:device_password" | base64
-
-# For enable password (X-PyATS-Enable header) - just the password
-echo -n "enable_password" | base64
 ```
 
 **Windows (use WSL):**
@@ -429,13 +384,10 @@ Now that you have your Base64-encoded credentials, add this to your MCP client c
         "mcp-remote",
         "https://<server_host>/mcp",
         "--header",
-        "X-Authorization:${CML_AUTH_HEADER}",
-        "--header",
-        "X-PyATS-Authorization:${PYATS_AUTH_HEADER}"
+        "X-Authorization:${CML_AUTH_HEADER}"
       ],
       "env": {
-        "CML_AUTH_HEADER": "Basic <base64_encoded_cml_credentials>",
-        "PYATS_AUTH_HEADER": "Basic <base64_encoded_device_credentials>"
+        "CML_AUTH_HEADER": "Basic <base64_encoded_cml_credentials>"
       }
     }
   }
@@ -448,7 +400,6 @@ Now that you have your Base64-encoded credentials, add this to your MCP client c
 
 - `<server_host>`: The hostname or HTTPS address of your reverse proxy (e.g., `cml-mcp.mycompany.com`)
 - `<base64_encoded_cml_credentials>`: Paste the Base64 string you generated for your CML username:password
-- `<base64_encoded_device_credentials>`: Paste the Base64 string you generated for your device username:password
 
 #### HTTPS with Self-Signed Certificates
 
@@ -464,13 +415,10 @@ If your reverse proxy uses a self-signed certificate, add `NODE_TLS_REJECT_UNAUT
         "mcp-remote",
         "https://<server_host>/mcp",
         "--header",
-        "X-Authorization:${CML_AUTH_HEADER}",
-        "--header",
-        "X-PyATS-Authorization:${PYATS_AUTH_HEADER}"
+        "X-Authorization:${CML_AUTH_HEADER}"
       ],
       "env": {
         "CML_AUTH_HEADER": "Basic <base64_encoded_cml_credentials>",
-        "PYATS_AUTH_HEADER": "Basic <base64_encoded_device_credentials>",
         "NODE_TLS_REJECT_UNAUTHORIZED": "0"
       }
     }
@@ -663,9 +611,6 @@ If credentials appear corrupted, you are likely hitting the Cursor / Windows Cla
 
 - `CML_VERIFY_SSL` - Verify SSL certificates (default: `false`)
 - `DEBUG` - Enable debug logging (default: `false`)
-- `PYATS_USERNAME` - Device username for CLI commands
-- `PYATS_PASSWORD` - Device password for CLI commands
-- `PYATS_AUTH_PASS` - Device enable password for CLI commands
 
 ### HTTP Transport Mode
 

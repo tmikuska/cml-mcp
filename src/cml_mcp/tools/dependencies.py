@@ -63,11 +63,6 @@ else:
 # Context variable to store request-scoped client for HTTP transport
 _request_client: contextvars.ContextVar[Optional[CMLClient]] = contextvars.ContextVar("request_client", default=None)
 
-# Context variables for PyATS credentials (per-request isolation)
-_pyats_username: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("pyats_username", default=None)
-_pyats_password: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("pyats_password", default=None)
-_pyats_auth_pass: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("pyats_auth_pass", default=None)
-
 
 async def cleanup_global_client() -> None:
     """Cleanup global CML client resources. Must be called before event loop shutdown."""

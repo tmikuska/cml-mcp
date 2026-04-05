@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-`cml-mcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that exposes Cisco Modeling Labs (CML) operations as AI-callable tools. It is written in Python (≥ 3.12) using [FastMCP](https://github.com/jlowin/fastmcp) and the `virl2_client` library. The package is published to PyPI as `cml-mcp` and to Docker Hub as `xorrkaz/cml-mcp`.
+`cml-mcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that exposes Cisco Modeling Labs (CML) operations as AI-callable tools. It is written in Python (≥ 3.12) using [FastMCP](https://github.com/jlowin/fastmcp). The package is published to PyPI as `cml-mcp` and to Docker Hub as `xorrkaz/cml-mcp`.
 
 ## Repository Layout
 
@@ -47,7 +47,7 @@ Each module exposes a `register_tools(mcp)` function called from `server.py`.
 - **Object arguments** — Tools that accept a Pydantic model also accept a `dict`. The type annotation (`SomeModel | dict`) is authoritative; never pass a JSON-encoded string.
 - **Destructive tools** — `wipe_*` and `delete_*` tools call `ctx.elicit()` for interactive confirmation. When `elicit` is unsupported (stateless HTTP or older clients) they proceed without a prompt; docstrings carry a `CRITICAL:` notice so LLMs still ask the user.
 - **Admin-only tools** — `create_cml_user`, `delete_cml_user`, `create_cml_group`, `delete_cml_group` check `client.is_admin()` at runtime and raise if the caller is not an admin.
-- **CLI commands** — `send_cli_command` uses PyATS (via `virl2_client.ClPyats`) or Unicon (`termws` binary). `config_command=true` enters configuration mode; omit `configure terminal` / `end`. `label` is the node label, not the UUID.
+- **CLI commands** — `send_cli_command` uses PyATS or Unicon (`termws` binary). `config_command=true` enters configuration mode; omit `configure terminal` / `end`. `label` is the node label, not the UUID.
 - **Packet capture data** — `get_packet_capture_data` returns a base64-encoded PCAP binary. Decode and save as `.pcap` for Wireshark/tcpdump.
 
 ## Environment Variables
@@ -58,9 +58,6 @@ Each module exposes a `register_tools(mcp)` function called from `server.py`.
 | `CML_USERNAME` | Yes | CML login username |
 | `CML_PASSWORD` | Yes | CML login password |
 | `CML_VERIFY_SSL` | No | Set `false` for self-signed certs |
-| `PYATS_USERNAME` | No | Device login username |
-| `PYATS_PASSWORD` | No | Device login password |
-| `PYATS_AUTH_PASS` | No | Device enable password |
 
 ## Transport Modes
 
@@ -96,5 +93,5 @@ Tests live in `tests/test_cml_mcp.py`. Mock JSON fixtures are in `tests/mocks/`.
 
 ## Dependencies
 
-Core: `httpx`, `fastmcp>=2.13.1,<3.0.0`, `fastapi`, `pydantic_strict_partial`, `typer`, `virl2_client`  
+Core: `httpx`, `fastmcp>=3.1.1,<4`, `fastapi`, `pydantic_strict_partial`, `typer`  
 Optional: `pyats`, `genie` (install as `cml-mcp[pyats]`)

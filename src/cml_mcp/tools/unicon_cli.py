@@ -1,35 +1,34 @@
 import logging
+import os
 
-import yaml
 from unicon import Connection
-
-from cml_mcp.cml_client import CMLClient
-from cml_mcp.cml.simple_webserver.schemas.common import UUID4Type
-from cml_mcp.cml.simple_webserver.schemas.nodes import NodeLabel
 
 logger = logging.getLogger("cml-mcp.tools.unicon_cli")
 
 TERMWS_BINARY = "/usr/local/bin/termws"
+UNICON_AVAILABLE = os.path.exists(TERMWS_BINARY)
 TIMEOUT = 300
 
 
 def unicon_send_cli_command_sync(
-    client: CMLClient,
-    lid: UUID4Type,
-    label: NodeLabel,  # pyright: ignore[reportInvalidTypeForm]
+    pyats_data: dict,
+    nodes_data: list,
+    label: str,
     commands: str,
     config_command: bool,
 ) -> str:
-    resp = client.vclient._session.get(f"/labs/{lid}/pyats_testbed")
-    pyats_data = yaml.safe_load(resp.text)
+    """Execute CLI commands via Unicon using the internal termws binary.
+
+    Args:
+        pyats_data: Pre-fetched pyATS testbed dict (from GET /labs/{lid}/pyats_testbed).
+        nodes_data: Pre-fetched node list (from GET /labs/{lid}/nodes?data=true&operational=true).
+        label: Node label to target.
+        commands: CLI commands to execute.
+        config_command: True for config mode, False for exec mode.
+    """
     device_pyats_data = pyats_data["devices"][label]
 
-    resp = client.vclient._session.get(f"/labs/{lid}/nodes", params={"data": True, "operational": True})
-    if resp.status_code != 200:
-        raise Exception("Cannot retrieve node console key. Is the node running?")
-
-    nodes = resp.json()
-    for node in nodes:
+    for node in nodes_data:
         if node["label"] == label:
             consoles = node["operational"]["serial_consoles"]
             console_key = consoles[0]["console_key"]
@@ -44,7 +43,7 @@ def unicon_send_cli_command_sync(
             hostname=label,
             start=[connect_command],
             os=device_pyats_data["os"],
-            series=device_pyats_data.get("series"),  # can be None
+            series=device_pyats_data.get("series"),
             credentials=device_pyats_data["credentials"],
             log_stdout=False,
             log_buffer=True,
@@ -64,7 +63,7 @@ def unicon_send_cli_command_sync(
 
         return result
     except Exception as exc:
-        logger.exception(f"Error sending CLI command '{commands}' to node {label} in lab {lid}: {str(exc)}")
+        logger.exception(f"Error sending CLI command '{commands}' to node {label}: {str(exc)}")
         raise
     finally:
         if connection is not None:

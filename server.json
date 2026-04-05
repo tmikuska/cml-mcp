@@ -39,27 +39,6 @@
           "format": "string",
           "isSecret": true,
           "name": "CML_PASSWORD"
-        },
-        {
-          "description": "Username for authentication to devices running in CML",
-          "isRequired": false,
-          "format": "string",
-          "isSecret": false,
-          "name": "PYATS_USERNAME"
-        },
-        {
-          "description": "Password for authentication to devices running in CML",
-          "isRequired": false,
-          "format": "string",
-          "isSecret": true,
-          "name": "PYATS_PASSWORD"
-        },
-        {
-          "description": "Enable password for authentication to devices running in CML",
-          "isRequired": false,
-          "format": "string",
-          "isSecret": true,
-          "name": "PYATS_AUTH_PASS"
         }
       ]
     }
