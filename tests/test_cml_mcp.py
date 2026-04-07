@@ -52,8 +52,9 @@ from cml_mcp.cml.simple_webserver.schemas.system import SystemHealth, SystemInfo
 from cml_mcp.cml.simple_webserver.schemas.topologies import Topology
 from cml_mcp.cml.simple_webserver.schemas.users import UserResponse
 from cml_mcp.types import SimplifiedInterfaceResponse, SuperSimplifiedNodeDefinitionResponse
-from tests.conftest import COMMON_TEST_LAB_TITLE
 
+
+pytestmark = pytest.mark.slow
 
 def _to_model(obj, cls):
     """Coerce a dict or dataclass to a Pydantic model instance."""
@@ -397,8 +398,9 @@ async def test_packet_capture_operations(main_mcp_client: Client[FastMCPTranspor
 @pytest.mark.live_only
 async def test_empty_lab_mgmt(main_mcp_client: Client[FastMCPTransport], created_lab: UUID4Type):
     lab_id = created_lab
+    lab_title = LabTitle("MCP Test Lab")
     # Fetch the lab details
-    lab_result = await main_mcp_client.call_tool(name="get_cml_lab_by_title", arguments={"title": str(COMMON_TEST_LAB_TITLE)})
+    lab_result = await main_mcp_client.call_tool(name="get_cml_lab_by_title", arguments={"title": lab_title})
 
     # outsource(lab_result.structured_content, ".json")
     if isinstance(lab_result.structured_content, dict):
