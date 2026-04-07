@@ -27,6 +27,7 @@ Usage:
 """
 
 from pathlib import Path
+import asyncio
 
 import pytest
 import yaml
@@ -52,8 +53,10 @@ from cml_mcp.cml.simple_webserver.schemas.system import SystemHealth, SystemInfo
 from cml_mcp.cml.simple_webserver.schemas.topologies import Topology
 from cml_mcp.cml.simple_webserver.schemas.users import UserResponse
 from cml_mcp.types import SimplifiedInterfaceResponse, SuperSimplifiedNodeDefinitionResponse
-from tests.conftest import COMMON_TEST_LAB_TITLE
 
+pytestmark = pytest.mark.slow
+
+COMMON_TEST_LAB_TITLE = LabTitle("MCP Test Lab")
 
 def _to_model(obj, cls):
     """Coerce a dict or dataclass to a Pydantic model instance."""
@@ -66,6 +69,15 @@ def _to_model(obj, cls):
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         return cls(**dataclasses.asdict(obj))
     return cls.model_validate(obj, from_attributes=True)
+
+
+def _tool_text(result) -> str:
+    """Extract plain text from a FastMCP tool result."""
+    if isinstance(result.data, str):
+        return result.data
+    if result.content and isinstance(result.content[0], TextContent):
+        return result.content[0].text
+    return str(result.data or "")
 
 
 async def test_list_tools(main_mcp_client: Client[FastMCPTransport]):
@@ -661,46 +673,62 @@ async def test_connect_two_nodes(main_mcp_client: Client[FastMCPTransport], crea
     for link in link_result.data:
         link = _to_model(link, LinkResponse)
         assert isinstance(link, LinkResponse)
+    link_id = _to_model(link_result.data[0], LinkResponse).id
 
     _ = await main_mcp_client.call_tool(
         name="start_cml_lab",
         arguments={"lab_id": lab_id, "wait_for_convergence": True},
     )
 
+    # Lab convergence waits on nodes only; packet capture needs LinkState.STARTED.
+    link_start = await main_mcp_client.call_tool(
+        name="start_cml_link",
+        arguments={"lab_id": lab_id, "link_id": link_id},
+    )
+    assert link_start.data is True
+    await asyncio.sleep(2)
+
+    warmup = await main_mcp_client.call_tool(
+        name="send_cli_command",
+        arguments={"lab_id": lab_id, "label": "MCP Test Node 1", "commands": "ping 192.0.2.2 repeat 3"},
+    )
+    warmup_out = _tool_text(warmup)
+    assert "!" in warmup_out or "success rate is 100 percent" in warmup_out.lower()
+
     capture_result = await main_mcp_client.call_tool(
         name="start_packet_capture",
         arguments={
             "lab_id": lab_id,
-            "link_id": _to_model(link_result.data[0], LinkResponse).id,
+            "link_id": link_id,
             "maxpackets": 100,  # we don't need 100, but we don't want it to stop too early either
             "bpfilter": "icmp",
         },
     )
     assert capture_result.data is True
 
-    _ = await main_mcp_client.call_tool(
+    ping = await main_mcp_client.call_tool(
         name="send_cli_command",
-        arguments={"lab_id": lab_id, "label": "MCP Test Node 1", "commands": "ping 192.0.2.2"},
+        arguments={"lab_id": lab_id, "label": "MCP Test Node 1", "commands": "ping 192.0.2.2 repeat 10"},
     )
+    ping_out = _tool_text(ping)
+    assert "!" in ping_out or "success rate is 100 percent" in ping_out.lower()
+
+    await asyncio.sleep(5)
 
     pcap_status = await main_mcp_client.call_tool(
         name="check_packet_capture_status",
-        arguments={
-            "lab_id": lab_id,
-            "link_id": _to_model(link_result.data[0], LinkResponse).id,
-        },
+        arguments={"lab_id": lab_id, "link_id": link_id},
     )
-    # outsource(pcap_status.structured_content, ".json")
     if isinstance(pcap_status.structured_content, dict):
         pcap_status.structured_content = PCAPStatusResponse(**pcap_status.structured_content)
     assert isinstance(pcap_status.structured_content, PCAPStatusResponse)
-    assert pcap_status.structured_content.packetscaptured >= 5  # should be at least 5 packets from the ping
+    assert pcap_status.structured_content.packetscaptured >= 5  # ping should produce multiple ICMP frames
 
     stop_result = await main_mcp_client.call_tool(
         name="stop_packet_capture",
         arguments={
             "lab_id": lab_id,
-            "link_id": _to_model(link_result.data[0], LinkResponse).id,
+            "link_id": link_id,
         },
     )
     assert stop_result.data is True
@@ -709,7 +737,7 @@ async def test_connect_two_nodes(main_mcp_client: Client[FastMCPTransport], crea
         name="get_captured_packet_overview",
         arguments={
             "lab_id": lab_id,
-            "link_id": _to_model(link_result.data[0], LinkResponse).id,
+            "link_id": link_id,
         },
     )
     # outsource(packet_overview.data, ".json")
@@ -727,7 +755,7 @@ async def test_connect_two_nodes(main_mcp_client: Client[FastMCPTransport], crea
         name="apply_link_conditioning",
         arguments={
             "lab_id": lab_id,
-            "link_id": _to_model(link_result.data[0], LinkResponse).id,
+            "link_id": link_id,
             "enabled": True,
             "bandwidth": 1000,
             "latency": 50,
