@@ -42,7 +42,7 @@ def unicon_send_cli_command_sync(
     else:
         raise Exception("Cannot retrieve node console key. Is the node running?")
 
-    connect_command = f"{TERMWS_BINARY} -host [::1] -port 8006 -internal {console_key}"
+    connect_command = f"{TERMWS_BINARY} -host [::1] -port 8006 {console_key}"
     connection = None
     try:
         connection = Connection(
@@ -61,6 +61,7 @@ def unicon_send_cli_command_sync(
         connection.settings.GRACEFUL_DISCONNECT_WAIT_SEC = 0
         connection.settings.POST_DISCONNECT_WAIT_SEC = 0
         connection.settings.LEARN_DEVICE_TOKENS = False
+        connection.settings.ENV = {"TOKEN": client.vclient._session.auth.token}
 
         if config_command:
             result = connection.configure(commands, timeout=TIMEOUT)
