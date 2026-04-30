@@ -18,6 +18,7 @@ src/cml_mcp/
     cache.py           # Thread-safe async session cache for HTTP mode
     dependencies.py    # Shared CML client dependency and elicitation helper
     middleware.py      # HTTP middleware and ACL enforcement
+    model_helpers.py   # Lenient Pydantic construction (strips unknown fields, accepts JSON strings)
 tests/
   conftest.py          # Fixtures; USE_MOCKS env var switches mock ↔ live mode
   mocks/               # Pre-recorded JSON responses for offline testing
@@ -47,10 +48,10 @@ Each module exposes a `register_tools(mcp)` function called from `server.py`.
 
 ## Key Conventions
 
-- **Object arguments** — Tools that accept a Pydantic model also accept a `dict`. The type annotation (`SomeModel | dict`) is authoritative; never pass a JSON-encoded string.
+- **Object arguments** — Tools that accept a Pydantic model also accept a `dict` or a JSON-encoded string. `model_helpers.lenient_construct` strips unknown fields and parses strings before handing the value to the Pydantic schema, so clients that serialize arguments as strings (e.g. AI Canvas) are handled transparently.
 - **Destructive tools** — `wipe_*` and `delete_*` tools call `ctx.elicit()` for interactive confirmation. When `elicit` is unsupported (stateless HTTP or older clients) they proceed without a prompt; docstrings carry a `CRITICAL:` notice so LLMs still ask the user.
 - **Admin-only tools** — `create_cml_user`, `delete_cml_user`, `create_cml_group`, `delete_cml_group` check `client.is_admin()` at runtime and raise if the caller is not an admin.
-- **CLI commands** — `send_cli_command` uses PyATS (via `virl2_client.ClPyats`) or Unicon (`termws` binary). `config_command=true` enters configuration mode; omit `configure terminal` / `end`. `label` is the node label, not the UUID.
+- **CLI commands** — `send_cli_command` uses PyATS (via `virl2_client.ClPyats`) or Unicon (`termws` binary). `config_command=true` enters configuration mode; omit `configure terminal` / `end`. `label` is the node label, not the UUID. Both `send_cli_command` and `get_console_log` accept an optional `console` integer (default `0`) to select which serial port to use; Docker-based nodes often expose a second console on index `1`.
 - **Packet capture data** — `get_packet_capture_data` returns a base64-encoded PCAP binary. Decode and save as `.pcap` for Wireshark/tcpdump.
 
 ## Environment Variables

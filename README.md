@@ -23,7 +23,7 @@ This is accomplished through the [Model Context Protocol (MCP)](https://modelcon
 - **Packet Capture:** Start, stop, and retrieve packet captures (PCAP) from network links for traffic analysis with Wireshark or other tools.
 - **Node Configuration:** Configure node startup configurations and send CLI commands to running devices.
 - **Run Commands on Devices:** Using [PyATS](https://developer.cisco.com/pyats/), MCP clients can execute commands on virtual devices within CML labs.
-- **Console Log Access:** Retrieve console logs from running nodes for troubleshooting and monitoring.
+- **Console Log Access:** Retrieve console logs from running nodes for troubleshooting and monitoring, with support for selecting specific serial console ports.
 - **Modular Architecture:** Tools are organized into logical modules (labs, nodes, links, pcap, etc.) for maintainability and extensibility.
 - **Access Control Lists (HTTP Mode):** When running in HTTP transport mode, you can restrict which users can access which tools using a YAML-based ACL configuration file.
 
@@ -109,8 +109,8 @@ The server provides 47 MCP tools organized into the following categories:
 - **stop_cml_node** - Stop a specific node
 - **wipe_cml_node** - Wipe node data (prompts for confirmation if client supports it)
 - **delete_cml_node** - Delete a node (prompts for confirmation if client supports it)
-- **get_console_log** - Get console output history for a node
-- **send_cli_command** - Execute CLI commands on running nodes (requires PyATS)
+- **get_console_log** - Get console output history for a node; optional `console` index selects the serial port (default `0`; Docker-based nodes often use both `0` and `1`)
+- **send_cli_command** - Execute CLI commands on running nodes (requires PyATS); optional `console` index selects which serial port to use
 
 ### Interface & Link Management
 

@@ -369,6 +369,7 @@ The server will start and listen for plain HTTP connections at `http://0.0.0.0:9
 - **CML Credentials**: Instead of being set via environment variables (`CML_USERNAME`/`CML_PASSWORD`), CML credentials are provided via the `X-Authorization` HTTP header using Basic authentication format.
 - **PyATS Credentials**: For CLI command execution, PyATS credentials can be provided via the `X-PyATS-Authorization` header (Basic auth) instead of `PYATS_USERNAME`/`PYATS_PASSWORD` environment variables, and the enable password via the `X-PyATS-Enable` header instead of `PYATS_AUTH_PASS`.
 - **Multiple CML Hosts**: When running in HTTP mode, clients can connect to different CML servers by providing the `X-CML-URL` header. For security, you must configure allowed URLs via the `CML_ALLOWED_URLS` environment variable (comma-separated list) or `CML_URL_PATTERN` (regex pattern).
+- **Unauthenticated tool discovery**: MCP protocol initialization (`initialize`) and tool listing (`tools/list`) do **not** require credentials. This allows AI clients such as Cisco AI Canvas to discover available tools before the user has supplied CML credentials. Actual tool calls always require authentication.
 
 Example headers:
 
