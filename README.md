@@ -38,7 +38,7 @@ The easiest way to get started is using `uvx` with Claude Desktop (or other MCP-
 ```json
 {
     "mcpServers": {                                                               
-        "cml-mcp": {                                                                
+        "Cisco Modeling Labs (MCP)": {                                                                
           "type": "stdio",                                                          
           "command": "uvx",
           "args": [                                                                 
