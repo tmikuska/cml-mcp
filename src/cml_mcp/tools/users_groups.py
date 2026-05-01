@@ -114,7 +114,6 @@ def register_tools(mcp):  # noqa: C901
         try:
             if not await client.is_admin():
                 raise ValueError("Only admin users can create new users.")
-
             payload = build_payload(
                 username=username,
                 password=password,

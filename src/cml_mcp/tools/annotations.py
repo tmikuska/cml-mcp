@@ -27,7 +27,7 @@ Annotation management tools for CML MCP server.
 """
 
 import logging
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import httpx
 from fastmcp import Context
@@ -50,7 +50,10 @@ from cml_mcp.cml.simple_webserver.schemas.annotations import (
     TextAnnotation,
     TextAnnotationResponse,
 )
-from cml_mcp.cml.simple_webserver.schemas.common import AnnotationColor, UUID4Type
+from cml_mcp.cml.simple_webserver.schemas.common import (
+    AnnotationColor,
+    UUID4Type,
+)
 from cml_mcp.tools.dependencies import elicit_confirmation, get_cml_client_dep
 from cml_mcp.tools.model_helpers import build_payload, field_from
 
@@ -69,7 +72,7 @@ def _wire_border_style(payload: dict) -> dict:
         return payload
     return {
         **payload,
-        "border_style": border_style_for_api(payload["border_style"]),
+        "border_style": border_style_for_api(str(payload["border_style"])),
     }
 
 
@@ -93,9 +96,11 @@ def register_tools(mcp):
     )
     async def get_annotations_for_cml_lab(
         lab_id: UUID4Type,
-    ) -> list[TextAnnotationResponse | RectangleAnnotationResponse | EllipseAnnotationResponse | LineAnnotationResponse]:
+    ) -> list[dict[str, Any]]:
         """
         Get all visual annotations (text labels, shapes, lines) on a lab's canvas by lab UUID.
+
+        Returns annotation dicts with MCP canonical border_style values (solid/dotted/dashed).
 
         Examples:
         - "Show me the annotations on my lab"
@@ -112,9 +117,11 @@ def register_tools(mcp):
                 model = _ANNOTATION_RESPONSE_TYPES.get(ann_type)
                 if model is None:
                     raise ToolError(f"Unknown annotation type: {ann_type!r}. " f"Expected one of {sorted(_ANNOTATION_RESPONSE_TYPES)}.")
-                annotation = _normalize_border_style_fields(annotation)
-                # See model_helpers.py / DEVELOPMENT.md: dump after construction to bypass FastMCP double marshalling.
-                ann_list.append(model(**annotation).model_dump(exclude_unset=True))
+                validated = model(**annotation)
+                dumped = _normalize_border_style_fields(
+                    validated.model_dump(exclude_unset=True)
+                )
+                ann_list.append(dumped)
             return ann_list
         except httpx.HTTPStatusError as e:
             raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
@@ -144,10 +151,7 @@ def register_tools(mcp):
         text_bold: Annotated[bool, field_from(TextAnnotation, "text_bold")],
         text_italic: Annotated[bool, field_from(TextAnnotation, "text_italic")],
         border_color: AnnotationColor,
-        border_style: Annotated[
-            BorderStyleLiteral,
-            field_from(TextAnnotation, "border_style"),
-        ],
+        border_style: BorderStyleLiteral,
         color: AnnotationColor,
         thickness: Annotated[int, field_from(TextAnnotation, "thickness")],
         z_index: Annotated[int, field_from(TextAnnotation, "z_index")],
@@ -212,10 +216,7 @@ def register_tools(mcp):
         x2: CoordinateFloat,
         y2: CoordinateFloat,
         border_color: AnnotationColor,
-        border_style: Annotated[
-            BorderStyleLiteral,
-            field_from(RectangleAnnotation, "border_style"),
-        ],
+        border_style: BorderStyleLiteral,
         color: AnnotationColor,
         thickness: Annotated[int, field_from(RectangleAnnotation, "thickness")],
         z_index: Annotated[int, field_from(RectangleAnnotation, "z_index")],
@@ -278,10 +279,7 @@ def register_tools(mcp):
         x2: CoordinateFloat,
         y2: CoordinateFloat,
         border_color: AnnotationColor,
-        border_style: Annotated[
-            BorderStyleLiteral,
-            field_from(EllipseAnnotation, "border_style"),
-        ],
+        border_style: BorderStyleLiteral,
         color: AnnotationColor,
         thickness: Annotated[int, field_from(EllipseAnnotation, "thickness")],
         z_index: Annotated[int, field_from(EllipseAnnotation, "z_index")],
@@ -342,10 +340,7 @@ def register_tools(mcp):
         x2: CoordinateFloat,
         y2: CoordinateFloat,
         border_color: AnnotationColor,
-        border_style: Annotated[
-            BorderStyleLiteral,
-            field_from(LineAnnotation, "border_style"),
-        ],
+        border_style: BorderStyleLiteral,
         color: AnnotationColor,
         thickness: Annotated[int, field_from(LineAnnotation, "thickness")],
         z_index: Annotated[int, field_from(LineAnnotation, "z_index")],

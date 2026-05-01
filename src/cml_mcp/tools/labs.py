@@ -27,6 +27,7 @@ Lab management tools for CML MCP server.
 """
 
 import asyncio
+import copy
 import logging
 import re
 from typing import Annotated
@@ -36,8 +37,7 @@ import yaml
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 
-from cml_mcp.cml.simple_common.schemas.types import UUID4_REG
-from cml_mcp.cml.simple_webserver.schemas.common import UserName, UUID4Type
+from cml_mcp.cml.simple_webserver.schemas.common import UUID4_REG, UserName, UUID4Type
 from cml_mcp.cml.simple_webserver.schemas.labs import Lab, LabAssociations, LabNotes, LabRequest, LabTitle
 from cml_mcp.cml.simple_webserver.schemas.topologies import Topology
 from cml_mcp.border_style import normalize_topology_border_styles, wire_topology_border_styles
@@ -109,12 +109,20 @@ async def download_lab_file(lab_id: UUID4Type, client: CMLClient) -> str:
     return text
 
 
+def topology_from_mcp_input(data: dict) -> Topology:
+    """Build a CML Topology from MCP input (canonical border_style aliases allowed)."""
+    payload = copy.deepcopy(data)
+    normalize_topology_border_styles(payload)
+    wire_topology_border_styles(payload)
+    return lenient_construct(Topology, payload)
+
+
 async def create_full_topology_from_obj(topology: Topology, client: CMLClient) -> UUID4Type:
     """
     Create complete lab from Topology object.
 
     Args:
-        topology (Topology): The topology object (canonical MCP border_style values).
+        topology (Topology): The topology object (legacy CML border_style wire values).
         client (CMLClient): The CML client instance.
 
     Returns:
@@ -312,7 +320,7 @@ def register_tools(mcp):  # noqa: C901
             "destructiveHint": False,
         },
     )
-    async def create_full_lab_topology(topology: Topology | dict | str) -> UUID4Type:
+    async def create_full_lab_topology(topology: dict | str) -> UUID4Type:
         """
         Import a complete CML lab from a Topology object (nodes + links + lab metadata).
 
@@ -321,6 +329,8 @@ def register_tools(mcp):  # noqa: C901
         optionally `annotations`. Do NOT pass a raw string such as a lab title, a YAML blob,
         or a non-Topology JSON string — those will fail. For simpler use cases, prefer
         `create_empty_lab` followed by `add_node_to_cml_lab` and `connect_two_nodes`.
+
+        Annotation `border_style` values may use MCP aliases `solid`, `dotted`, or `dashed`.
 
         Expected shape:
           {
@@ -341,9 +351,8 @@ def register_tools(mcp):  # noqa: C901
         """
         client = get_cml_client_dep()
         try:
-            if isinstance(topology, (dict, str)):
-                topology = lenient_construct(Topology, parse_json_arg(topology))
-            return await create_full_topology_from_obj(topology, client)
+            topology_model = topology_from_mcp_input(parse_json_arg(topology))
+            return await create_full_topology_from_obj(topology_model, client)
         except httpx.HTTPStatusError as e:
             raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
         except Exception as e:
@@ -560,6 +569,7 @@ def register_tools(mcp):  # noqa: C901
             else:
                 yaml_data["lab"]["title"] = f"Copy of {yaml_data['lab']['title']}"
 
+            wire_topology_border_styles(yaml_data)
             topology = Topology(**yaml_data)
             return await create_full_topology_from_obj(topology, client)
         except httpx.HTTPStatusError as e:
