@@ -40,7 +40,8 @@ from cml_mcp.cml.simple_common.schemas.types import UUID4_REG
 from cml_mcp.cml.simple_webserver.schemas.common import UserName, UUID4Type
 from cml_mcp.cml.simple_webserver.schemas.labs import Lab, LabAssociations, LabNotes, LabRequest, LabTitle
 from cml_mcp.cml.simple_webserver.schemas.topologies import Topology
-from cml_mcp.border_style import normalize_topology_border_styles, wire_topology_border_styles
+from cml_mcp.border_style import wire_topology_border_styles
+from cml_mcp.topology_input import TopologyInput
 from cml_mcp.cml_client import CMLClient
 from cml_mcp.tools.dependencies import elicit_confirmation, get_cml_client_dep
 from cml_mcp.tools.model_helpers import build_payload, field_from, lenient_construct, parse_json_arg
@@ -101,15 +102,10 @@ async def download_lab_file(lab_id: UUID4Type, client: CMLClient) -> str:
         str: The topology as a YAML string.
     """
     topo_data = await client.get(f"/labs/{lab_id}/download", is_binary=True)
-    text = topo_data.decode("utf-8")
-    yaml_data = yaml.safe_load(text)
-    if isinstance(yaml_data, dict):
-        normalize_topology_border_styles(yaml_data)
-        return yaml.dump(yaml_data, sort_keys=False)
-    return text
+    return topo_data.decode("utf-8")
 
 
-async def create_full_topology_from_obj(topology: Topology, client: CMLClient) -> UUID4Type:
+async def create_full_topology_from_obj(topology: TopologyInput | Topology, client: CMLClient) -> UUID4Type:
     """
     Create complete lab from Topology object.
 
@@ -312,7 +308,7 @@ def register_tools(mcp):  # noqa: C901
             "destructiveHint": False,
         },
     )
-    async def create_full_lab_topology(topology: Topology | dict | str) -> UUID4Type:
+    async def create_full_lab_topology(topology: TopologyInput | dict | str) -> UUID4Type:
         """
         Import a complete CML lab from a Topology object (nodes + links + lab metadata).
 
@@ -342,7 +338,7 @@ def register_tools(mcp):  # noqa: C901
         client = get_cml_client_dep()
         try:
             if isinstance(topology, (dict, str)):
-                topology = lenient_construct(Topology, parse_json_arg(topology))
+                topology = lenient_construct(TopologyInput, parse_json_arg(topology))
             return await create_full_topology_from_obj(topology, client)
         except httpx.HTTPStatusError as e:
             raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")

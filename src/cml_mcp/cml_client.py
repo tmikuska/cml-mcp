@@ -74,6 +74,7 @@ class CMLClient(object):
             username,
             password,
             ssl_verify=verify_ssl,
+            allow_http=True,
             client_type=MCP_CLIENT_IDENTIFIER,
         )
         self.client = httpx.AsyncClient(verify=verify_ssl, timeout=API_TIMEOUT)

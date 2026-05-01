@@ -34,11 +34,7 @@ from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import BaseModel
 
-from cml_mcp.border_style import (
-    BorderStyleLiteral,
-    border_style_for_api,
-    border_style_from_api,
-)
+from cml_mcp.border_style import BorderStyleLiteral, border_style_for_api
 from cml_mcp.cml.simple_webserver.schemas.annotations import (
     CoordinateFloat,
     EllipseAnnotation,
@@ -50,7 +46,10 @@ from cml_mcp.cml.simple_webserver.schemas.annotations import (
     TextAnnotation,
     TextAnnotationResponse,
 )
-from cml_mcp.cml.simple_webserver.schemas.common import AnnotationColor, UUID4Type
+from cml_mcp.cml.simple_webserver.schemas.common import (
+    AnnotationColor,
+    UUID4Type,
+)
 from cml_mcp.tools.dependencies import elicit_confirmation, get_cml_client_dep
 from cml_mcp.tools.model_helpers import build_payload, field_from
 
@@ -69,16 +68,7 @@ def _wire_border_style(payload: dict) -> dict:
         return payload
     return {
         **payload,
-        "border_style": border_style_for_api(payload["border_style"]),
-    }
-
-
-def _normalize_border_style_fields(annotation: dict) -> dict:
-    if "border_style" not in annotation:
-        return annotation
-    return {
-        **annotation,
-        "border_style": border_style_from_api(annotation["border_style"]),
+        "border_style": border_style_for_api(str(payload["border_style"])),
     }
 
 
@@ -112,7 +102,6 @@ def register_tools(mcp):
                 model = _ANNOTATION_RESPONSE_TYPES.get(ann_type)
                 if model is None:
                     raise ToolError(f"Unknown annotation type: {ann_type!r}. " f"Expected one of {sorted(_ANNOTATION_RESPONSE_TYPES)}.")
-                annotation = _normalize_border_style_fields(annotation)
                 # See model_helpers.py / DEVELOPMENT.md: dump after construction to bypass FastMCP double marshalling.
                 ann_list.append(model(**annotation).model_dump(exclude_unset=True))
             return ann_list

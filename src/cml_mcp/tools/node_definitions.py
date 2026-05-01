@@ -33,6 +33,7 @@ from fastmcp.exceptions import ToolError
 
 from cml_mcp.cml.simple_webserver.schemas.common import DefinitionID
 from cml_mcp.cml.simple_webserver.schemas.node_definitions import NodeDefinitionResponse
+from cml_mcp.cml.simple_webserver.yaml_export import serialize_node_definition_json
 from cml_mcp.cml_client import CMLClient
 from cml_mcp.tools.dependencies import get_cml_client_dep
 from cml_mcp.types import SuperSimplifiedNodeDefinitionResponse
@@ -51,7 +52,7 @@ async def get_node_def_details(definition_id: DefinitionID, client: CMLClient) -
         Validated node definition export payload.
     """
     node_definition = await client.get(f"/node_definitions/{definition_id}", params={"json": True})
-    return NodeDefinitionResponse.model_validate(node_definition).model_dump(exclude_unset=True)
+    return serialize_node_definition_json(node_definition)
 
 
 def register_tools(mcp):

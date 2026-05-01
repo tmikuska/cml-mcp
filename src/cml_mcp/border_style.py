@@ -21,20 +21,24 @@ _CANONICAL_TO_LEGACY: dict[str, str] = {
 }
 
 
-def _to_canonical(value: str) -> str:
+def migrate_legacy_border_style(value: str) -> str:
+    """Normalize legacy or canonical border_style wire values to MCP canonical form."""
     if value in CANONICAL_BORDER_STYLES:
         return value
-    return _LEGACY_TO_CANONICAL[value]
+    try:
+        return _LEGACY_TO_CANONICAL[value]
+    except KeyError as exc:
+        raise ValueError(f"Unknown border_style: {value!r}") from exc
 
 
 def border_style_from_api(value: str) -> str:
     """Normalize CML REST API border_style to canonical MCP values."""
-    return _to_canonical(value)
+    return migrate_legacy_border_style(value)
 
 
 def border_style_for_api(value: str) -> str:
     """Serialize MCP border_style to legacy CML REST API wire values."""
-    return _CANONICAL_TO_LEGACY[_to_canonical(value)]
+    return _CANONICAL_TO_LEGACY[migrate_legacy_border_style(value)]
 
 
 def _map_topology_border_styles(payload: dict, transform) -> dict:

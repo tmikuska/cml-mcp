@@ -27,6 +27,7 @@ Usage:
 """
 
 from pathlib import Path
+import asyncio
 
 import pytest
 import yaml
@@ -67,6 +68,42 @@ def _to_model(obj, cls):
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         return cls(**dataclasses.asdict(obj))
     return cls.model_validate(obj, from_attributes=True)
+
+
+def _tool_text(result) -> str:
+    """Extract plain text from a FastMCP tool result."""
+    if isinstance(result.data, str):
+        return result.data
+    if result.content and isinstance(result.content[0], TextContent):
+        return result.content[0].text
+    return str(result.data or "")
+
+
+async def _is_ping_reachable(
+    main_mcp_client: Client[FastMCPTransport],
+    lab_id: UUID4Type,
+    label: str,
+    target: str,
+    timeout: float = 60.0,
+    interval: float = 3.0,
+) -> str:
+    """Retry ping until IOS reports success or *timeout* expires."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    last_out = ""
+    command = f"ping {target} repeat 3"
+    while asyncio.get_running_loop().time() < deadline:
+        result = await main_mcp_client.call_tool(
+            name="send_cli_command",
+            arguments={"lab_id": lab_id, "label": label, "commands": command},
+        )
+        last_out = _tool_text(result)
+        if "!" in last_out or "success rate is 100 percent" in last_out.lower():
+            return last_out
+        await asyncio.sleep(interval)
+    pytest.fail(
+        f"Ping to {target} from {label} did not succeed within {timeout}s; "
+        f"last output: {last_out!r}"
+    )
 
 
 async def test_list_tools(main_mcp_client: Client[FastMCPTransport]):
@@ -284,25 +321,25 @@ async def test_get_annotations_for_cml_lab(main_mcp_client: Client[FastMCPTransp
                 assert annotation.x1 == snapshot(150.0)
                 assert annotation.y1 == snapshot(150.0)
                 assert annotation.rotation == snapshot(15)
-                assert annotation.border_style == "dashed"
+                assert annotation.border_style == "4,2"
             elif ann_type == "line":
                 annotation = LineAnnotationResponse(**annotation)
                 assert annotation.type == "line"
                 assert annotation.line_start == snapshot("arrow")
                 assert annotation.line_end == snapshot("circle")
-                assert annotation.border_style == "solid"
+                assert annotation.border_style == ""
             elif ann_type == "rectangle":
                 annotation = RectangleAnnotationResponse(**annotation)
                 assert annotation.type == "rectangle"
                 assert annotation.border_radius == snapshot(10)
-                assert annotation.border_style == "solid"
+                assert annotation.border_style == ""
             elif ann_type == "text":
                 annotation = TextAnnotationResponse(**annotation)
                 assert annotation.type == "text"
                 assert annotation.text_content == snapshot("This is a test annotation")
                 assert annotation.text_bold is True
                 assert annotation.text_italic is False
-                assert annotation.border_style == "dotted"
+                assert annotation.border_style == "2,2"
             else:
                 pytest.fail(f"Unknown annotation type: {ann_type}")
 
@@ -619,15 +656,17 @@ def _line_annotation_payload(border_style: str) -> dict:
 
 
 @pytest.mark.live_only
-async def test_cml_api_rejects_canonical_border_style_direct(live_cml_api_client, created_lab: UUID4Type):
-    """CML REST API rejects dashed without legacy wire conversion."""
+async def test_cml_api_accepts_canonical_border_style_direct(
+    live_cml_api_client, created_lab: UUID4Type
+):
+    """CML REST API accepts canonical dashed border_style wire values."""
     await live_cml_api_client.check_authentication()
     url = f"{live_cml_api_client.api_base}/labs/{created_lab}/annotations"
     resp = await live_cml_api_client.client.post(
         url,
         json=_line_annotation_payload("dashed"),
     )
-    assert resp.status_code == 400, resp.text
+    assert resp.status_code in {200, 201}, resp.text
 
 
 @pytest.mark.live_only
@@ -739,46 +778,56 @@ async def test_connect_two_nodes(main_mcp_client: Client[FastMCPTransport], crea
     for link in link_result.data:
         link = _to_model(link, LinkResponse)
         assert isinstance(link, LinkResponse)
+    link_id = _to_model(link_result.data[0], LinkResponse).id
 
     _ = await main_mcp_client.call_tool(
         name="start_cml_lab",
         arguments={"lab_id": lab_id, "wait_for_convergence": True},
     )
 
+    # Lab convergence waits on nodes only; packet capture needs LinkState.STARTED.
+    link_start = await main_mcp_client.call_tool(
+        name="start_cml_link",
+        arguments={"lab_id": lab_id, "link_id": link_id},
+    )
+    assert link_start.data is True
+
+    await _is_ping_reachable(main_mcp_client, lab_id, "MCP Test Node 1", "192.0.2.2")
+
     capture_result = await main_mcp_client.call_tool(
         name="start_packet_capture",
         arguments={
             "lab_id": lab_id,
-            "link_id": _to_model(link_result.data[0], LinkResponse).id,
+            "link_id": link_id,
             "maxpackets": 100,  # we don't need 100, but we don't want it to stop too early either
             "bpfilter": "icmp",
         },
     )
     assert capture_result.data is True
 
-    _ = await main_mcp_client.call_tool(
+    ping = await main_mcp_client.call_tool(
         name="send_cli_command",
-        arguments={"lab_id": lab_id, "label": "MCP Test Node 1", "commands": "ping 192.0.2.2"},
+        arguments={"lab_id": lab_id, "label": "MCP Test Node 1", "commands": "ping 192.0.2.2 repeat 10"},
     )
+    ping_out = _tool_text(ping)
+    assert "!" in ping_out or "success rate is 100 percent" in ping_out.lower()
+
+    await asyncio.sleep(5)
 
     pcap_status = await main_mcp_client.call_tool(
         name="check_packet_capture_status",
-        arguments={
-            "lab_id": lab_id,
-            "link_id": _to_model(link_result.data[0], LinkResponse).id,
-        },
+        arguments={"lab_id": lab_id, "link_id": link_id},
     )
-    # outsource(pcap_status.structured_content, ".json")
     if isinstance(pcap_status.structured_content, dict):
         pcap_status.structured_content = PCAPStatusResponse(**pcap_status.structured_content)
     assert isinstance(pcap_status.structured_content, PCAPStatusResponse)
-    assert pcap_status.structured_content.packetscaptured >= 5  # should be at least 5 packets from the ping
+    assert pcap_status.structured_content.packetscaptured >= 5  # ping should produce multiple ICMP frames
 
     stop_result = await main_mcp_client.call_tool(
         name="stop_packet_capture",
         arguments={
             "lab_id": lab_id,
-            "link_id": _to_model(link_result.data[0], LinkResponse).id,
+            "link_id": link_id,
         },
     )
     assert stop_result.data is True
@@ -787,7 +836,7 @@ async def test_connect_two_nodes(main_mcp_client: Client[FastMCPTransport], crea
         name="get_captured_packet_overview",
         arguments={
             "lab_id": lab_id,
-            "link_id": _to_model(link_result.data[0], LinkResponse).id,
+            "link_id": link_id,
         },
     )
     # outsource(packet_overview.data, ".json")
@@ -805,7 +854,7 @@ async def test_connect_two_nodes(main_mcp_client: Client[FastMCPTransport], crea
         name="apply_link_conditioning",
         arguments={
             "lab_id": lab_id,
-            "link_id": _to_model(link_result.data[0], LinkResponse).id,
+            "link_id": link_id,
             "enabled": True,
             "bandwidth": 1000,
             "latency": 50,
@@ -862,8 +911,8 @@ async def test_download_lab_topology(main_mcp_client: Client[FastMCPTransport], 
     assert isinstance(yaml_content, str)
     assert len(yaml_content) > 0
     parsed = yaml.safe_load(yaml_content)
-    assert parsed["annotations"][0]["border_style"] == "dashed"
-    assert parsed["smart_annotations"][0]["border_style"] == "dotted"
+    assert parsed["annotations"][0]["border_style"] == "4,2"
+    assert parsed["smart_annotations"][0]["border_style"] == "2,2"
 
 
 @pytest.mark.mock_only
