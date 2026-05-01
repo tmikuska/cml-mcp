@@ -22,14 +22,66 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 
+import importlib
+import importlib.abc
+import importlib.machinery
 import sys
-from pathlib import Path
 
-from cml_mcp.settings import settings
 
-# Add the cml directory to sys.path to allow relative imports within the CML schemas
-_cml_path = Path(__file__).parent / "cml"
-if str(_cml_path) not in sys.path:
-    sys.path.insert(0, str(_cml_path))
+class _SchemaAliasLoader(importlib.abc.Loader):
+    """Aliases a cml_mcp.cml.* module to its real counterpart in sys.modules."""
+
+    def __init__(self, real_name: str) -> None:
+        self._real_name = real_name
+
+    def create_module(self, spec):
+        return None
+
+    def exec_module(self, module):
+        real_mod = importlib.import_module(self._real_name)
+        # Replace the freshly-created stub in sys.modules with the real module so
+        # that dunders (__name__, __file__, __loader__, __spec__, __path__) and
+        # identity comparisons all reflect the real package, not a shallow copy.
+        sys.modules[module.__name__] = real_mod
+
+
+class _NamespaceLoader(importlib.abc.Loader):
+    """Creates an empty namespace package for cml_mcp.cml."""
+
+    def create_module(self, spec):
+        return None
+
+    def exec_module(self, module):
+        module.__path__ = []
+
+
+class _CMLSchemaFinder(importlib.abc.MetaPathFinder):
+    """Redirect cml_mcp.cml.{simple_common,simple_webserver} to real installed packages.
+
+    When cml-mcp is installed inside CML, the real simple_common and
+    simple_webserver packages are available.  This finder intercepts imports
+    of the (now removed) bundled copies under cml_mcp.cml.* and transparently
+    redirects them to the real packages.
+    """
+
+    _NAMESPACE = "cml_mcp.cml"
+    _REDIRECTS = {
+        "cml_mcp.cml.simple_common": "simple_common",
+        "cml_mcp.cml.simple_webserver": "simple_webserver",
+    }
+
+    def find_spec(self, fullname, path, target=None):
+        if fullname == self._NAMESPACE:
+            return importlib.machinery.ModuleSpec(fullname, _NamespaceLoader(), is_package=True)
+        for prefix, real_prefix in self._REDIRECTS.items():
+            if fullname == prefix or fullname.startswith(prefix + "."):
+                real_name = real_prefix + fullname[len(prefix) :]
+                return importlib.machinery.ModuleSpec(fullname, _SchemaAliasLoader(real_name))
+        return None
+
+
+sys.meta_path.insert(0, _CMLSchemaFinder())
+
+from cml_mcp.settings import settings  # noqa: E402
 
 __all__ = ["settings"]
