@@ -1,4 +1,5 @@
 import logging
+import os
 
 import yaml
 from unicon import Connection
@@ -6,6 +7,7 @@ from unicon import Connection
 from cml_mcp.cml.simple_webserver.schemas.common import UUID4Type
 from cml_mcp.cml.simple_webserver.schemas.nodes import NodeLabel
 from cml_mcp.cml_client import CMLClient
+from cml_mcp.tools.dependencies import _pyats_auth_pass, _pyats_password, _pyats_username
 
 logger = logging.getLogger("cml-mcp.tools.unicon_cli")
 
@@ -43,6 +45,16 @@ def unicon_send_cli_command_sync(
         raise Exception("Cannot retrieve node console key. Is the node running?")
 
     connect_command = f"{TERMWS_BINARY} -host [::1] -port 8006 {console_key}"
+
+    credentials = device_pyats_data["credentials"]
+    custom_username = _pyats_username.get() or os.getenv("PYATS_USERNAME")
+    custom_password = _pyats_password.get() or os.getenv("PYATS_PASSWORD")
+    if custom_username and custom_password:
+        credentials = dict(credentials)
+        credentials["default"] = {"username": custom_username, "password": custom_password}
+        enable_password = _pyats_auth_pass.get() or os.getenv("PYATS_AUTH_PASS") or custom_password
+        credentials["enable"] = {"password": enable_password}
+
     connection = None
     try:
         connection = Connection(
@@ -50,7 +62,7 @@ def unicon_send_cli_command_sync(
             start=[connect_command],
             os=device_pyats_data["os"],
             series=device_pyats_data.get("series"),  # can be None
-            credentials=device_pyats_data["credentials"],
+            credentials=credentials,
             log_stdout=False,
             log_buffer=True,
             learn_hostname=True,
