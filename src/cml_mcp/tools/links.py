@@ -35,6 +35,7 @@ from fastmcp.exceptions import ToolError
 from cml_mcp.cml.simple_webserver.schemas.common import UUID4Type
 from cml_mcp.cml.simple_webserver.schemas.links import LinkConditionConfiguration, LinkCreate, LinkResponse
 from cml_mcp.tools.dependencies import get_cml_client_dep
+from cml_mcp.tools.errors import sanitize_http_error
 from cml_mcp.tools.model_helpers import build_payload, field_from
 
 logger = logging.getLogger("cml-mcp.tools.links")
@@ -76,7 +77,7 @@ def register_tools(mcp):
             resp = await client.post(f"/labs/{lab_id}/links", data=payload)
             return UUID4Type(resp["id"])
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error creating link between %s and %s", src_int, dst_int)
             raise ToolError(e)
@@ -102,7 +103,7 @@ def register_tools(mcp):
             resp = await client.get(f"/labs/{lab_id}/links", params={"data": True})
             return [LinkResponse(**link).model_dump(exclude_unset=True) for link in resp]
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting links for lab %s", lab_id)
             raise ToolError(e)
@@ -168,7 +169,7 @@ def register_tools(mcp):
             await client.patch(f"/labs/{lab_id}/links/{link_id}/condition", data=payload)
             return True
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error conditioning link %s in lab %s", link_id, lab_id)
             raise ToolError(e)
@@ -195,7 +196,7 @@ def register_tools(mcp):
             await client.put(f"/labs/{lab_id}/links/{link_id}/state/start")
             return True
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error starting CML link %s in lab %s", link_id, lab_id)
             raise ToolError(e)
@@ -222,7 +223,7 @@ def register_tools(mcp):
             await client.put(f"/labs/{lab_id}/links/{link_id}/state/stop")
             return True
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error stopping CML link %s in lab %s", link_id, lab_id)
             raise ToolError(e)
