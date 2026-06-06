@@ -10,7 +10,7 @@
     {
       "type": "line",
       "border_color": "#0000FF",
-      "border_style": "4,2",
+      "border_style": "dashed",
       "color": "#0000FF",
       "thickness": 2,
       "x1": 100.0,
@@ -25,7 +25,7 @@
   "smart_annotations": [
     {
       "tag": "core",
-      "border_style": "2,2"
+      "border_style": "dotted"
     }
   ]
 }

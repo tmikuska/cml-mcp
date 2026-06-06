@@ -35,8 +35,10 @@ from fastmcp.exceptions import ToolError
 
 from cml_mcp.cml.simple_webserver.schemas.common import UUID4Type
 from cml_mcp.cml.simple_webserver.schemas.pcap import PCAPItem, PCAPStart, PCAPStatusResponse
-from cml_mcp.cml_client import CMLClient
+from cml_mcp.cml_client import CMLClient, ResponseTooLargeError
+from cml_mcp.settings import settings
 from cml_mcp.tools.dependencies import get_cml_client_dep
+from cml_mcp.tools.errors import sanitize_http_error
 from cml_mcp.tools.model_helpers import build_payload, field_from
 
 logger = logging.getLogger("cml-mcp.tools.pcap")
@@ -97,7 +99,7 @@ def register_tools(mcp):
             await client.put(f"/labs/{lab_id}/links/{link_id}/capture/start", data=payload)
             return True
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error starting packet capture on link %s in lab %s", link_id, lab_id)
             raise ToolError(e)
@@ -119,7 +121,7 @@ def register_tools(mcp):
             await client.put(f"/labs/{lab_id}/links/{link_id}/capture/stop")
             return True
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error stopping packet capture on link %s in lab %s", link_id, lab_id)
             raise ToolError(e)
@@ -143,7 +145,7 @@ def register_tools(mcp):
             # See DEVELOPMENT.md "Object-typed return values": dump after construction so FastMCP doesn't double-marshal.
             return PCAPStatusResponse(**status).model_dump(exclude_unset=True)
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error checking packet capture status on link %s in lab %s", link_id, lab_id)
             raise ToolError(e)
@@ -167,7 +169,7 @@ def register_tools(mcp):
             packets = await client.get(f"/pcap/{key}/packets")
             return [PCAPItem(**packet).model_dump(exclude_unset=True) for packet in packets]
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting packet capture overview on link %s in lab %s", link_id, lab_id)
             raise ToolError(e)
@@ -179,7 +181,10 @@ def register_tools(mcp):
         """
         Download the complete PCAP file for a link by lab and link UUID. Returns base64-encoded
         binary PCAP data -- decode and save as a .pcap file for Wireshark, tcpdump, or other
-        analysis tools.
+        analysis tools. Rejects captures larger than the server-configured maximum size
+        (CML_PCAP_MAX_SIZE_BYTES, default 64 MiB) with a clear error. The download is streamed
+        and aborted as soon as the cap is exceeded, so an oversized capture is never fully
+        buffered into memory.
 
         Examples:
         - "Download the pcap from link xyz"
@@ -190,13 +195,22 @@ def register_tools(mcp):
         try:
             # Get the capture key for the link
             key = await get_capture_key(lab_id, link_id, client)
-            # Download the PCAP data using the capture key
-            pcap_data = await client.get(f"/pcap/{key}", is_binary=True)
+            # Stream the PCAP data, aborting before it is fully buffered if it exceeds the cap.
+            try:
+                pcap_data = await client.get_binary_capped(f"/pcap/{key}", settings.cml_pcap_max_size_bytes)
+            except ResponseTooLargeError as e:
+                raise ToolError(
+                    f"Packet capture is {e.size} bytes, which exceeds the configured maximum of"
+                    f" {e.max_bytes} bytes (CML_PCAP_MAX_SIZE_BYTES). Reduce maxpackets/maxtime"
+                    " or apply a bpfilter and re-capture."
+                )
             # Encode the binary PCAP data to a base64 string
             encoded_pcap = base64.b64encode(pcap_data).decode("utf-8")
             return encoded_pcap
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
+        except ToolError:
+            raise
         except Exception as e:
             logger.exception("Error getting packet capture data from link %s in lab %s", link_id, lab_id)
             raise ToolError(e)

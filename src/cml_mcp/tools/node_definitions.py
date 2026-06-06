@@ -35,6 +35,7 @@ from cml_mcp.cml.simple_webserver.schemas.common import DefinitionID
 from cml_mcp.cml.simple_webserver.schemas.node_definitions import NodeDefinition
 from cml_mcp.cml_client import CMLClient
 from cml_mcp.tools.dependencies import get_cml_client_dep
+from cml_mcp.tools.errors import sanitize_http_error
 from cml_mcp.types import SuperSimplifiedNodeDefinitionResponse
 
 logger = logging.getLogger("cml-mcp.tools.node_definitions")
@@ -81,7 +82,7 @@ def register_tools(mcp):
             node_definitions = await client.get("/simplified_node_definitions")
             return [SuperSimplifiedNodeDefinitionResponse(**nd).model_dump(exclude_unset=True) for nd in node_definitions]
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting CML node definitions")
             raise ToolError(e)
@@ -106,7 +107,7 @@ def register_tools(mcp):
         try:
             return await get_node_def_details(definition_id, client)
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting node definition detail for %s", definition_id)
             raise ToolError(e)

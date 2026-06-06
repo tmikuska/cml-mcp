@@ -30,15 +30,10 @@ import logging
 from typing import Annotated, Literal
 
 import httpx
-from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import BaseModel
 
-from cml_mcp.border_style import (
-    BorderStyleLiteral,
-    border_style_for_api,
-    border_style_from_api,
-)
+from cml_mcp.border_style import border_style_for_api, border_style_from_api
 from cml_mcp.cml.simple_webserver.schemas.annotations import (
     CoordinateFloat,
     EllipseAnnotation,
@@ -50,8 +45,13 @@ from cml_mcp.cml.simple_webserver.schemas.annotations import (
     TextAnnotation,
     TextAnnotationResponse,
 )
-from cml_mcp.cml.simple_webserver.schemas.common import AnnotationColor, UUID4Type
-from cml_mcp.tools.dependencies import elicit_confirmation, get_cml_client_dep
+from cml_mcp.cml.simple_webserver.schemas.common import (
+    AnnotationColor,
+    BorderStyle,
+    UUID4Type,
+)
+from cml_mcp.tools.dependencies import get_cml_client_dep
+from cml_mcp.tools.errors import sanitize_http_error
 from cml_mcp.tools.model_helpers import build_payload, field_from
 
 logger = logging.getLogger("cml-mcp.tools.annotations")
@@ -69,7 +69,7 @@ def _wire_border_style(payload: dict) -> dict:
         return payload
     return {
         **payload,
-        "border_style": border_style_for_api(payload["border_style"]),
+        "border_style": border_style_for_api(str(payload["border_style"])),
     }
 
 
@@ -117,7 +117,7 @@ def register_tools(mcp):
                 ann_list.append(model(**annotation).model_dump(exclude_unset=True))
             return ann_list
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting annotations for lab %s", lab_id)
             raise ToolError(e)
@@ -145,7 +145,7 @@ def register_tools(mcp):
         text_italic: Annotated[bool, field_from(TextAnnotation, "text_italic")],
         border_color: AnnotationColor,
         border_style: Annotated[
-            BorderStyleLiteral,
+            BorderStyle,
             field_from(TextAnnotation, "border_style"),
         ],
         color: AnnotationColor,
@@ -190,7 +190,7 @@ def register_tools(mcp):
             resp = await client.post(f"/labs/{lab_id}/annotations", data=_wire_border_style(payload))
             return UUID4Type(resp["id"])
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error adding text annotation to lab %s", lab_id)
             raise ToolError(e)
@@ -213,7 +213,7 @@ def register_tools(mcp):
         y2: CoordinateFloat,
         border_color: AnnotationColor,
         border_style: Annotated[
-            BorderStyleLiteral,
+            BorderStyle,
             field_from(RectangleAnnotation, "border_style"),
         ],
         color: AnnotationColor,
@@ -256,7 +256,7 @@ def register_tools(mcp):
             resp = await client.post(f"/labs/{lab_id}/annotations", data=_wire_border_style(payload))
             return UUID4Type(resp["id"])
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error adding rectangle annotation to lab %s", lab_id)
             raise ToolError(e)
@@ -279,7 +279,7 @@ def register_tools(mcp):
         y2: CoordinateFloat,
         border_color: AnnotationColor,
         border_style: Annotated[
-            BorderStyleLiteral,
+            BorderStyle,
             field_from(EllipseAnnotation, "border_style"),
         ],
         color: AnnotationColor,
@@ -320,7 +320,7 @@ def register_tools(mcp):
             resp = await client.post(f"/labs/{lab_id}/annotations", data=_wire_border_style(payload))
             return UUID4Type(resp["id"])
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error adding ellipse annotation to lab %s", lab_id)
             raise ToolError(e)
@@ -343,7 +343,7 @@ def register_tools(mcp):
         y2: CoordinateFloat,
         border_color: AnnotationColor,
         border_style: Annotated[
-            BorderStyleLiteral,
+            BorderStyle,
             field_from(LineAnnotation, "border_style"),
         ],
         color: AnnotationColor,
@@ -388,7 +388,7 @@ def register_tools(mcp):
             resp = await client.post(f"/labs/{lab_id}/annotations", data=_wire_border_style(payload))
             return UUID4Type(resp["id"])
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error adding line annotation to lab %s", lab_id)
             raise ToolError(e)
@@ -403,13 +403,14 @@ def register_tools(mcp):
     async def delete_annotation_from_lab(
         lab_id: UUID4Type,
         annotation_id: UUID4Type,
-        ctx: Context,
+        confirm: bool = False,
     ) -> bool:
         """
         Delete a single annotation by lab and annotation UUID.
 
-        CRITICAL: Destructive. Always ask "Confirm deletion of [annotation]?" and wait for the
-        user's "yes" before invoking this tool.
+        CRITICAL: Destructive. This tool uses a two-stage confirm: call it once with confirm
+        omitted/false to preview, ask the user "Confirm deletion of [annotation]?", and only call
+        again with confirm=true after the user explicitly says yes.
 
         Examples:
         - "Delete the 'Core Network' label"
@@ -417,13 +418,16 @@ def register_tools(mcp):
         - "Get rid of the red rectangle"
         """
         client = get_cml_client_dep()
+        if not confirm:
+            raise ToolError(
+                f"This will delete annotation {annotation_id} from lab {lab_id}."
+                " Ask the user to confirm, then re-call this tool with confirm=true to proceed."
+            )
         try:
-            if not await elicit_confirmation(ctx, "Are you sure you want to delete the annotation?"):
-                raise Exception("Delete operation cancelled by user.")
             await client.delete(f"/labs/{lab_id}/annotations/{annotation_id}")
             return True
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error deleting annotation %s from lab %s", annotation_id, lab_id)
             raise ToolError(e)

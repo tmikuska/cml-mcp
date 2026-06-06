@@ -31,13 +31,13 @@ import logging
 from typing import Annotated
 
 import httpx
-from fastmcp import Context
 from fastmcp.exceptions import ToolError
 
 from cml_mcp.cml.simple_webserver.schemas.common import Coordinate, DefinitionID, TagArray, UUID4Type
 from cml_mcp.cml.simple_webserver.schemas.nodes import CpuLimit, Cpus, DiskSpace, Node, NodeConfigurationContent, NodeCreate, Ram
 from cml_mcp.cml_client import CMLClient
-from cml_mcp.tools.dependencies import elicit_confirmation, get_cml_client_dep
+from cml_mcp.tools.dependencies import get_cml_client_dep
+from cml_mcp.tools.errors import sanitize_http_error
 from cml_mcp.tools.model_helpers import build_payload, field_from
 
 logger = logging.getLogger("cml-mcp.tools.nodes")
@@ -104,7 +104,7 @@ def register_tools(mcp):  # noqa: C901
                 rnodes.append(Node(**node).model_dump(exclude_unset=True))
             return rnodes
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting nodes for CML lab %s", lab_id)
             raise ToolError(e)
@@ -180,7 +180,7 @@ def register_tools(mcp):  # noqa: C901
             )
             return UUID4Type(resp["id"])
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error adding CML node to lab %s", lab_id)
             raise ToolError(e)
@@ -211,7 +211,7 @@ def register_tools(mcp):  # noqa: C901
             await client.patch(f"/labs/{lab_id}/nodes/{node_id}", data=payload)
             return True
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error configuring CML node %s in lab %s", node_id, lab_id)
             raise ToolError(e)
@@ -233,7 +233,7 @@ def register_tools(mcp):  # noqa: C901
             await stop_node(lab_id, node_id, client)
             return True
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error stopping CML node %s in lab %s", node_id, lab_id)
             raise ToolError(e)
@@ -271,7 +271,7 @@ def register_tools(mcp):  # noqa: C901
                     await asyncio.sleep(3)
             return True
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error starting CML node %s in lab %s", node_id, lab_id)
             raise ToolError(e)
@@ -279,12 +279,13 @@ def register_tools(mcp):  # noqa: C901
     @mcp.tool(
         annotations={"title": "Wipe a CML Node", "readOnlyHint": False, "destructiveHint": True, "idempotentHint": True},
     )
-    async def wipe_cml_node(lab_id: UUID4Type, node_id: UUID4Type, ctx: Context) -> bool:
+    async def wipe_cml_node(lab_id: UUID4Type, node_id: UUID4Type, confirm: bool = False) -> bool:
         """
         Wipe a single node's disks by lab and node UUID. Erases all node data. Node must be stopped first.
 
-        CRITICAL: Destructive and irreversible. Always ask "Confirm wipe of [node]?" and wait for the
-        user's "yes" before invoking this tool.
+        CRITICAL: Destructive and irreversible. This tool uses a two-stage confirm: call it once
+        with confirm omitted/false to preview, ask the user "Confirm wipe of [node]?", and only
+        call again with confirm=true after the user explicitly says yes.
 
         Examples:
         - "Wipe node R1"
@@ -292,13 +293,16 @@ def register_tools(mcp):  # noqa: C901
         - "Erase the disk on node xyz"
         """
         client = get_cml_client_dep()
+        if not confirm:
+            raise ToolError(
+                f"This will irreversibly wipe node {node_id} in lab {lab_id} (erase all node disk data)."
+                " Ask the user to confirm, then re-call this tool with confirm=true to proceed."
+            )
         try:
-            if not await elicit_confirmation(ctx, "Are you sure you want to wipe the node?"):
-                raise Exception("Wipe operation cancelled by user.")
             await wipe_node(lab_id, node_id, client)
             return True
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error wiping CML node %s in lab %s", node_id, lab_id)
             raise ToolError(e)
@@ -306,12 +310,13 @@ def register_tools(mcp):  # noqa: C901
     @mcp.tool(
         annotations={"title": "Delete a node from a CML lab.", "readOnlyHint": False, "destructiveHint": True},
     )
-    async def delete_cml_node(lab_id: UUID4Type, node_id: UUID4Type, ctx: Context) -> bool:
+    async def delete_cml_node(lab_id: UUID4Type, node_id: UUID4Type, confirm: bool = False) -> bool:
         """
         Delete a node from a lab by lab and node UUID. Auto-stops and wipes the node first.
 
-        CRITICAL: Destructive and irreversible. Always ask "Confirm deletion of [node]?" and wait for the
-        user's "yes" before invoking this tool.
+        CRITICAL: Destructive and irreversible. This tool uses a two-stage confirm: call it once
+        with confirm omitted/false to preview, ask the user "Confirm deletion of [node]?", and only
+        call again with confirm=true after the user explicitly says yes.
 
         Examples:
         - "Delete node R1 from my lab"
@@ -319,15 +324,18 @@ def register_tools(mcp):  # noqa: C901
         - "Get rid of node xyz"
         """
         client = get_cml_client_dep()
+        if not confirm:
+            raise ToolError(
+                f"This will irreversibly delete node {node_id} from lab {lab_id} (stop, wipe, and remove it)."
+                " Ask the user to confirm, then re-call this tool with confirm=true to proceed."
+            )
         try:
-            if not await elicit_confirmation(ctx, "Are you sure you want to delete the node?"):
-                raise Exception("Delete operation cancelled by user.")
             await stop_node(lab_id, node_id, client)  # Ensure the node is stopped before deletion
             await wipe_node(lab_id, node_id, client)
             await client.delete(f"/labs/{lab_id}/nodes/{node_id}")
             return True
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error deleting CML node %s in lab %s", node_id, lab_id)
             raise ToolError(e)
