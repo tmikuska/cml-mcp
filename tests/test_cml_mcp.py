@@ -45,10 +45,11 @@ from cml_mcp.cml.simple_webserver.schemas.common import DefinitionID, UUID4Type
 from cml_mcp.cml.simple_webserver.schemas.groups import GroupResponse
 from cml_mcp.cml.simple_webserver.schemas.labs import Lab, LabTitle
 from cml_mcp.cml.simple_webserver.schemas.links import LinkResponse
-from cml_mcp.cml.simple_webserver.schemas.node_definitions import NodeDefinition
+from cml_mcp.cml.simple_webserver.schemas.node_definitions import NodeDefinitionResponse
 from cml_mcp.cml.simple_webserver.schemas.nodes import Node
 from cml_mcp.cml.simple_webserver.schemas.pcap import PCAPItem, PCAPStatusResponse
-from cml_mcp.cml.simple_webserver.schemas.system import SystemHealth, SystemInformation, SystemStats
+from cml_mcp.cml.simple_common.schemas.system_health import SystemHealth
+from cml_mcp.cml.simple_webserver.schemas.system import SystemInformation, SystemStats
 from cml_mcp.cml.simple_webserver.schemas.topologies import Topology
 from cml_mcp.cml.simple_webserver.schemas.users import UserResponse
 from cml_mcp.types import SimplifiedInterfaceResponse, SuperSimplifiedNodeDefinitionResponse
@@ -229,8 +230,10 @@ async def test_node_defs(main_mcp_client: Client[FastMCPTransport]):
             pass
             # outsource(nd_result.structured_content, ".json")
         if isinstance(nd_result.structured_content, dict):
-            nd_result.structured_content = NodeDefinition(**nd_result.structured_content)
-        assert isinstance(nd_result.structured_content, NodeDefinition)
+            nd_result.structured_content = NodeDefinitionResponse.model_validate(
+                nd_result.structured_content
+            )
+        assert isinstance(nd_result.structured_content, NodeDefinitionResponse)
 
 
 @pytest.mark.mock_only

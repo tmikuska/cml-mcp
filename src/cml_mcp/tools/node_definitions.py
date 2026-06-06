@@ -32,7 +32,7 @@ import httpx
 from fastmcp.exceptions import ToolError
 
 from cml_mcp.cml.simple_webserver.schemas.common import DefinitionID
-from cml_mcp.cml.simple_webserver.schemas.node_definitions import NodeDefinition
+from cml_mcp.cml.simple_webserver.schemas.node_definitions import NodeDefinitionResponse
 from cml_mcp.cml_client import CMLClient
 from cml_mcp.tools.dependencies import get_cml_client_dep
 from cml_mcp.types import SuperSimplifiedNodeDefinitionResponse
@@ -40,7 +40,7 @@ from cml_mcp.types import SuperSimplifiedNodeDefinitionResponse
 logger = logging.getLogger("cml-mcp.tools.node_definitions")
 
 
-async def get_node_def_details(definition_id: DefinitionID, client: CMLClient) -> NodeDefinition:
+async def get_node_def_details(definition_id: DefinitionID, client: CMLClient) -> dict:
     """
     Get detailed information about a specific node definition by its ID.
 
@@ -48,10 +48,10 @@ async def get_node_def_details(definition_id: DefinitionID, client: CMLClient) -
         did (DefinitionID): The node definition ID.
 
     Returns:
-        NodeDefinition: The node definition details.
+        Validated node definition export payload.
     """
     node_definition = await client.get(f"/node_definitions/{definition_id}", params={"json": True})
-    return NodeDefinition(**node_definition).model_dump(exclude_unset=True)
+    return NodeDefinitionResponse.model_validate(node_definition).model_dump(exclude_unset=True)
 
 
 def register_tools(mcp):
@@ -92,7 +92,7 @@ def register_tools(mcp):
             "readOnlyHint": True,
         },
     )
-    async def get_node_definition_detail(definition_id: DefinitionID) -> NodeDefinition:
+    async def get_node_definition_detail(definition_id: DefinitionID) -> NodeDefinitionResponse:
         """
         Get full details for one node definition by id: interfaces, default device config,
         boot options, and resource requirements.
