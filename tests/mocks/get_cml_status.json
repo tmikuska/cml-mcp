@@ -1,5 +1,6 @@
 {
   "valid": true,
+  "status": "ok",
   "computes": {
     "17e91b4e-865a-4627-a6bb-50e3dfa988ab": {
       "kvm_vmx_enabled": true,
@@ -12,9 +13,15 @@
       "refplat_images_available": true,
       "docker_shim": true,
       "valid": true,
+      "status": "ok",
+      "missing_nodes_count": 0,
+      "orphaned_nodes_count": 0,
       "admission_state": "READY",
       "is_controller": true,
-      "hostname": "cml-controller"
+      "hostname": "cml-controller",
+      "cpu_overload": false,
+      "memory_overload": false,
+      "disk_overload": false
     }
   },
   "is_licensed": true,
@@ -23,6 +30,10 @@
     "core_connected": true,
     "nodes_loaded": true,
     "images_loaded": true,
-    "valid": true
+    "valid": true,
+    "airhandler": true,
+    "dispatcher": true,
+    "ipsnooper": true,
+    "pcapdemux": true
   }
 }

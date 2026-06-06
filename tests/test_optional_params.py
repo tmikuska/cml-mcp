@@ -61,7 +61,7 @@ async def test_create_empty_lab_with_no_arguments(main_mcp_client: Client[FastMC
     result = await main_mcp_client.call_tool(name="create_empty_lab", arguments={})
     lab_id = _result_uuid(result)
 
-    del_result = await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": lab_id})
+    del_result = await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": lab_id, "confirm": True})
     assert del_result.data is True
 
 
@@ -108,7 +108,7 @@ async def test_create_cml_user_with_only_required_args(main_mcp_client: Client[F
     )
     user_id = _result_uuid(result)
 
-    del_result = await main_mcp_client.call_tool(name="delete_cml_user", arguments={"user_id": user_id})
+    del_result = await main_mcp_client.call_tool(name="delete_cml_user", arguments={"user_id": user_id, "confirm": True})
     assert del_result.data is True
 
 
@@ -116,5 +116,5 @@ async def test_create_cml_group_with_only_required_args(main_mcp_client: Client[
     result = await main_mcp_client.call_tool(name="create_cml_group", arguments={"name": "mcp_optional_args_group"})
     group_id = _result_uuid(result)
 
-    del_result = await main_mcp_client.call_tool(name="delete_cml_group", arguments={"group_id": group_id})
+    del_result = await main_mcp_client.call_tool(name="delete_cml_group", arguments={"group_id": group_id, "confirm": True})
     assert del_result.data is True

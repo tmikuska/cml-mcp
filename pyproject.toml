@@ -17,16 +17,12 @@ classifiers = [
 ]
 dependencies = [
     "httpx",
-    "fastmcp>=3.1.1,<4",
+    "fastmcp>=3.4.11,<4",
     "fastapi",
     "pydantic_strict_partial",
     "typer",
-    "virl2_client",
 ]
-optional-dependencies = { "pyats" = [
-    "pyats",
-    "genie",
-], "opentelemetry" = [
+optional-dependencies = { "opentelemetry" = [
     "opentelemetry-distro",
     "opentelemetry-exporter-otlp",
 ] }
@@ -60,6 +56,7 @@ dev = [
     "black",
     "isort",
     "flake8",
+    "pre-commit",
 ]
 
 [tool.pytest.ini_options]

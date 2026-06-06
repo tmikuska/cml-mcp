@@ -35,6 +35,7 @@ from cml_mcp.cml.simple_webserver.schemas.common import MACAddress, UUID4Type
 from cml_mcp.cml.simple_webserver.schemas.interfaces import InterfaceSlot
 from cml_mcp.cml_client import CMLClient
 from cml_mcp.tools.dependencies import get_cml_client_dep
+from cml_mcp.tools.errors import sanitize_http_error
 from cml_mcp.tools.model_helpers import build_payload
 from cml_mcp.types import SimplifiedInterfaceResponse
 
@@ -101,7 +102,7 @@ def register_tools(mcp):
             )
             return await add_interface(lab_id, payload, client)
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error adding interface to node %s in lab %s", node, lab_id)
             raise ToolError(e)
@@ -131,7 +132,7 @@ def register_tools(mcp):
             # See DEVELOPMENT.md "Object-typed return values": dump after construction so FastMCP doesn't double-marshal.
             return [SimplifiedInterfaceResponse(**iface).model_dump(exclude_unset=True) for iface in resp]
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting interfaces for node %s in lab %s", node_id, lab_id)
             raise ToolError(e)
