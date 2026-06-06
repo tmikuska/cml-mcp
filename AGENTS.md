@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-`cml-mcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that exposes Cisco Modeling Labs (CML) operations as AI-callable tools. It is written in Python (≥ 3.12) using [FastMCP](https://github.com/jlowin/fastmcp) and the `virl2_client` library. The package is published to PyPI as `cml-mcp` and to Docker Hub as `xorrkaz/cml-mcp`.
+`cml-mcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that exposes Cisco Modeling Labs (CML) operations as AI-callable tools. It is written in Python (≥ 3.12) using [FastMCP](https://github.com/jlowin/fastmcp) and direct CML REST API calls via `httpx`. The package is published to PyPI as `cml-mcp` and to Docker Hub as `xorrkaz/cml-mcp`.
 
 ## Compatibility Goal
 
@@ -48,14 +48,14 @@ Each module exposes a `register_tools(mcp)` function called from `server.py`.
 | `pcap.py` | start/stop_packet_capture, check_packet_capture_status, get_captured_packet_overview, get_packet_capture_data |
 | `users_groups.py` | get_cml_users/groups, create/delete_cml_user/group |
 | `system.py` | get_cml_information, get_cml_status, get_cml_statistics, get_cml_licensing_details |
-| `cli.py` | send_cli_command (PyATS/Unicon), get_console_log |
+| `cli.py` | send_cli_command (native `/cli` on 2.11+; optional pyATS fallback), get_console_log |
 
 ## Key Conventions
 
 - **Object arguments** — Most tools use flat primitive parameters (str, int, bool, etc.) for better LLM compatibility, especially with smaller / open-weight models. Only `create_full_lab_topology` still accepts `Model | dict | str` and uses `model_helpers.lenient_construct` to strip unknown fields and parse JSON-encoded strings (helpful for clients like AI Canvas).
 - **Destructive tools** — `wipe_*` and `delete_*` tools route confirmation through `elicit_confirmation()` in `tools/dependencies.py`. **Elicitation is currently disabled** (the helper returns `True` unconditionally) because several MCP clients — notably GitHub Copilot — either don't support `ctx.elicit()` cleanly or duplicate the prompt. While disabled, every destructive tool relies entirely on the `CRITICAL:` line in its docstring to push the LLM to ask the user for confirmation. Keep using `await elicit_confirmation(ctx, ...)` in new destructive tools so re-enabling later is a one-line change.
 - **Admin-only tools** — `create_cml_user`, `delete_cml_user`, `create_cml_group`, `delete_cml_group` check `client.is_admin()` at runtime and raise if the caller is not an admin.
-- **CLI commands** — `send_cli_command` uses PyATS (via `virl2_client.ClPyats`). `config_command=true` enters configuration mode; omit `configure terminal` / `end`. `label` is the node label, not the UUID. Both `send_cli_command` and `get_console_log` accept an optional `console` integer (default `0`) to select which serial port to use; Docker-based nodes often expose a second console on index `1`.
+- **CLI commands** — `send_cli_command` uses the CML native `POST /labs/{id}/nodes/{id}/cli` API on controllers 2.11+. On older servers, install `cml-mcp[pyats]` for a direct pyATS/SSH fallback. `config_command=true` enters configuration mode; omit `configure terminal` / `end`. `label` is the node label, not the UUID. Both `send_cli_command` and `get_console_log` accept an optional `console` integer (default `0`) to select which serial port to use; Docker-based nodes often expose a second console on index `1`.
 - **Packet capture data** — `get_packet_capture_data` returns a base64-encoded PCAP binary. Decode and save as `.pcap` for Wireshark/tcpdump.
 
 ## Environment Variables
@@ -166,7 +166,7 @@ async def start_packet_capture(
     ...
 ```
 
-**Schema-drift audit checklist** — run when `virl2_client` / regenerated CML schemas change:
+**Schema-drift audit checklist** — run when CML schemas change (bundled `src/cml_mcp/cml/` upstream, or `simple_webserver` on the internal fork):
 
 - `git diff src/cml_mcp/cml/` — for each changed `*Request` / `*Create` model, find the wrapping tool(s).
 - Add new fields as new primitive kwargs (default `None`); deprecate removed fields for one release before removal.
@@ -178,9 +178,9 @@ async def start_packet_capture(
 
 #### Sample prompt for agents auditing a schema bump
 
-When `virl2_client` is upgraded (or `src/cml_mcp/cml/` is regenerated), run a fresh agent with the following prompt — it forces a complete diff/update cycle and leaves no flattened tool stale:
+When CML schemas change (regenerated `src/cml_mcp/cml/` upstream, or `simple_webserver` on the internal fork), run a fresh agent with the following prompt — it forces a complete diff/update cycle and leaves no flattened tool stale:
 
-> Audit this repo for CML schema drift after a `virl2_client` / `src/cml_mcp/cml/` update.
+> Audit this repo for CML schema drift after a schema update.
 >
 > 1. Run `git diff <previous-tag>..HEAD -- src/cml_mcp/cml/` and list every changed Pydantic model (focus on `*Request`, `*Create`, `*Update`, and any model referenced by a flattened tool — see `FLAT_TOOL_SCHEMAS` in `tests/test_schema_drift.py`).
 > 2. For each changed model, find the wrapping tool(s) under `src/cml_mcp/tools/` (grep for the model name and the `# Source schema:` comment).
@@ -197,5 +197,5 @@ Register the tool by adding (or relying on) the module's `register_tools(mcp)` c
 
 ## Dependencies
 
-Core: `httpx`, `fastmcp>=3.1.1,<4`, `fastapi`, `pydantic_strict_partial`, `typer`, `virl2_client`  
-Optional: `pyats`, `genie` (install as `cml-mcp[pyats]`)
+Core: `httpx`, `fastmcp>=3.1.1,<4`, `fastapi`, `pydantic_strict_partial`, `typer`  
+Optional: `pyats`, `genie` (install as `cml-mcp[pyats]` for CLI on controllers older than 2.11)

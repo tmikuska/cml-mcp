@@ -9,8 +9,8 @@
 # uv will automatically create an isolated environment with the required
 # dependencies listed above — nothing is installed into your system Python.
 
-import math
 import logging
+import math
 
 import click  # pyright: ignore[reportMissingImports]
 

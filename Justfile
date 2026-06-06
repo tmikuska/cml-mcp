@@ -20,10 +20,19 @@ check:
     uv run isort --check-only src/ tests/
     uv run flake8 src/ tests/
 
+# Run pre-commit hooks (default: all files; omit args on commit for staged-only)
+[group('qa')]
+pre-commit args='--all-files':
+    uv run pre-commit run {{args}}
+
 [group('build')]
 build:
     uv build
     docker buildx build --platform linux/amd64,linux/arm64 -t xorrkaz/cml-mcp:latest -t xorrkaz/cml-mcp:$(uv version --short) .
+
+[group('build')]
+build-cml:
+    pip wheel --no-deps --wheel-dir dist .
 
 # Update dependencies
 [group('lifecycle')]

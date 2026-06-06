@@ -24,13 +24,45 @@
 
 import logging
 import os
+import re
 from typing import Any
 
 import httpx
-import virl2_client
 
 API_TIMEOUT = 10  # seconds
 MCP_CLIENT_IDENTIFIER = "CmlMCP"
+
+# POST /labs/{lab_id}/nodes/{node_id}/cli was introduced in CML 2.11. Servers
+# older than this do not have the endpoint at all, so CLI execution falls back
+# to a direct pyATS/SSH connection via the optional cml-mcp[pyats] extra.
+_MIN_NATIVE_CLI_VERSION = (2, 11, 0)
+
+# Leading X.Y.Z triple from controller version strings (same idea as
+# virl2_client.utils.Version.parse_version_str).
+_CONTROLLER_VERSION_RE = re.compile(r"^(\d{1,2})\.(\d{1,2})\.(\d{1,2})")
+
+
+def _strip_controller_version(version: str) -> tuple[int, int, int] | None:
+    """Normalize a controller version to (major, minor, patch).
+
+    Strips build/local suffixes the same way as tests/integration/test_server.py
+    (``split('-')[0].split('+')[0]``), then parses the leading X.Y.Z triple and
+    ignores dev/rc suffixes such as ``dev0`` (as virl2_client Version does).
+    """
+    normalized = version.strip().lstrip("v").split("-")[0].split("+")[0]
+    match = _CONTROLLER_VERSION_RE.match(normalized)
+    if not match:
+        return None
+    return int(match[1]), int(match[2]), int(match[3])
+
+
+def _controller_supports_native_cli(version: str) -> bool:
+    """Return True when the connected controller is on the 2.11+ API line."""
+    stripped = _strip_controller_version(version)
+    if stripped is None:
+        return False
+    return stripped >= _MIN_NATIVE_CLI_VERSION
+
 
 # Set up logging for this module only
 logger = logging.getLogger("cml-mcp.cml_client")
@@ -66,16 +98,10 @@ class CMLClient(object):
         self._token = None
         self.admin = None
         self.needs_reauth = False
+        self._supports_native_cli: bool | None = None
 
         self.base_url = host.rstrip("/")
         self.api_base = f"{self.base_url}/api/v0"
-        self.vclient = virl2_client.ClientLibrary(
-            host,
-            username,
-            password,
-            ssl_verify=verify_ssl,
-            client_type=MCP_CLIENT_IDENTIFIER,
-        )
         self.client = httpx.AsyncClient(verify=verify_ssl, timeout=API_TIMEOUT)
         self.client.headers.update({"X-CML-CLIENT": MCP_CLIENT_IDENTIFIER})
 
@@ -158,6 +184,27 @@ class CMLClient(object):
             logger.exception("Error checking admin status")
             return False
 
+    async def supports_native_cli(self) -> bool:
+        """
+        Check whether the connected CML controller exposes the native
+        POST /labs/{lab_id}/nodes/{node_id}/cli endpoint (added in CML 2.11).
+
+        The result is derived from /system_information's "version" field and
+        cached for the lifetime of this client, since the controller version
+        cannot change mid-session.
+        """
+        if self._supports_native_cli is not None:
+            return self._supports_native_cli
+
+        try:
+            info = await self.get("/system_information")
+            self._supports_native_cli = _controller_supports_native_cli(info["version"])
+        except Exception:
+            logger.exception("Could not determine CML server version; assuming native CLI API is unavailable")
+            self._supports_native_cli = False
+
+        return self._supports_native_cli
+
     async def get(self, endpoint: str, params: dict | None = None, is_binary: bool = False) -> Any:
         """
         Make a GET request to the CML API.
@@ -172,14 +219,23 @@ class CMLClient(object):
             logger.exception("Error making GET request to %s", url)
             raise e
 
-    async def post(self, endpoint: str, data: dict | None = None, params: dict | None = None) -> Any | None:
+    async def post(
+        self,
+        endpoint: str,
+        data: dict | None = None,
+        params: dict | None = None,
+        timeout: float | None = None,
+    ) -> Any | None:
         """
         Make a POST request to the CML API.
         """
         await self.check_authentication()
         url = f"{self.api_base}{endpoint}"
+        request_kwargs: dict[str, Any] = {"json": data, "params": params}
+        if timeout is not None:
+            request_kwargs["timeout"] = timeout
         try:
-            resp = await self.client.post(url, json=data, params=params)
+            resp = await self.client.post(url, **request_kwargs)
             resp.raise_for_status()
             if resp.status_code == 204:  # No content
                 return None

@@ -7,17 +7,20 @@ Set the USE_MOCKS environment variable to control the behavior:
 - USE_MOCKS=false: Run against a live CML server
 """
 
+import base64
 import json
 import os
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from fastmcp.client import Client
 from fastmcp.client.transports import FastMCPTransport
 from mcp.types import TextContent
 
+from cml_mcp import settings
 from cml_mcp.cml.simple_webserver.schemas.common import UUID4Type
 from cml_mcp.cml.simple_webserver.schemas.labs import LabTitle
 
@@ -63,7 +66,6 @@ class MockCMLClient:
             "annotations": {},
             "packet_captures": {},
         }
-        self._next_id = 1000
 
     def _generate_id(self) -> str:
         """Generate a unique ID for created resources."""
@@ -163,7 +165,20 @@ class MockCMLClient:
         # Return empty response for unknown endpoints
         return {}
 
-    async def post(self, endpoint: str, data: dict | None = None, params: dict | None = None) -> Any | None:
+    async def supports_native_cli(self) -> bool:
+        """Derive native CLI support from the mocked system_information version."""
+        from cml_mcp.cml_client import _controller_supports_native_cli
+
+        info = await self.get("/system_information")
+        return _controller_supports_native_cli(info.get("version", ""))
+
+    async def post(
+        self,
+        endpoint: str,
+        data: dict | None = None,
+        params: dict | None = None,
+        timeout: float | None = None,
+    ) -> Any | None:
         """Mock POST request handler."""
         # Handle create operations
         if endpoint == "/labs":
@@ -200,6 +215,9 @@ class MockCMLClient:
                 return None
             elif endpoint.endswith("/wipe"):
                 return None
+            elif "/nodes/" in endpoint and endpoint.endswith("/cli"):
+                command = (data or {}).get("command", "")
+                return f"mock output for: {command}"
 
         if endpoint == "/users":
             user_id = self._generate_id()
@@ -293,6 +311,14 @@ if USE_MOCKS:
     cml_mcp.cml_client.CMLClient = lambda *args, **kwargs: MockCMLClient()
 
 
+def _custom_httpx_client_factory(headers=None, *args, **kwargs):
+    """httpx client factory that disables SSL verification for self-signed certs."""
+    kwargs["verify"] = False
+    kwargs["follow_redirects"] = True
+    kwargs["headers"] = headers
+    return httpx.AsyncClient(*args, **kwargs)
+
+
 @pytest.fixture()
 async def live_cml_api_client():
     """Authenticated CML REST client for live-only API-level checks."""
@@ -320,23 +346,37 @@ async def live_cml_api_client():
 
 
 @pytest.fixture()
-async def main_mcp_client():
-    """
-    Main MCP client fixture for testing.
-    Works with both mock and live modes.
-    """
-    from fastmcp.client import Client
+async def main_mcp_client(request):
+    """MCP client fixture that connects to a remote server or the in-process mock."""
+    remote_url = request.config.getoption("--controller-url", default=None)
 
-    from cml_mcp.server import server_mcp
+    if remote_url and not USE_MOCKS:
+        remote_url = f"{remote_url.rstrip('/')}/mcp"
+        creds_bytes = ":".join([settings.cml_username, settings.cml_password]).encode()
+        base64_creds = base64.b64encode(creds_bytes).decode()
+        headers = {"X-Authorization": f"Basic {base64_creds}"}
 
-    async with Client(transport=server_mcp) as mcp_client:
-        yield mcp_client
+        from fastmcp.client.transports import StreamableHttpTransport
+
+        transport = StreamableHttpTransport(
+            url=remote_url,
+            headers=headers,
+            httpx_client_factory=_custom_httpx_client_factory,
+        )
+        async with Client(transport=transport, timeout=300) as mcp_client:
+            yield mcp_client
+    else:
+        from cml_mcp.server import server_mcp
+
+        async with Client(transport=server_mcp) as mcp_client:
+            yield mcp_client
 
 
 def pytest_configure(config):
     """Add custom markers."""
     config.addinivalue_line("markers", "live_only: mark test to run only against live CML server")
     config.addinivalue_line("markers", "mock_only: mark test to run only with mocks")
+    config.addinivalue_line("markers", "slow: mark test to run slowly")
 
 
 def pytest_collection_modifyitems(config, items):

@@ -11,7 +11,7 @@ This guide covers how to set up a development environment, common workflows, and
 - [Daily Workflow](#daily-workflow)
 - [Adding a New Tool](#adding-a-new-tool)
 - [Recording Mock Responses](#recording-mock-responses)
-- [Bumping `virl2_client` / Regenerating CML Schemas](#bumping-virl2_client--regenerating-cml-schemas)
+- [Bumping CML Schemas](#bumping-cml-schemas)
 - [Debugging and Inspecting the Server](#debugging-and-inspecting-the-server)
 - [Testing](#testing)
 - [Code Style](#code-style)
@@ -65,7 +65,17 @@ This guide covers how to set up a development environment, common workflows, and
     PYATS_AUTH_PASS=enable_password
     ```
 
-5. Verify your setup:
+5. (Recommended) Install git pre-commit hooks:
+
+    ```sh
+    uv run pre-commit install
+    ```
+
+    Run this from the `cml-mcp` repository root (the directory that contains
+    `.pre-commit-config.yaml`). Hooks run black, isort, flake8, and a few
+    file hygiene checks on each commit — the same linters as `just check`.
+
+6. Verify your setup:
 
     ```sh
     just check    # lint
@@ -86,6 +96,7 @@ The project uses [`just`](https://github.com/casey/just) as its task runner. **A
 | `just test [args]` | Run the offline test suite (mocks). Pass pytest args, e.g. `just test "-x -k packet"` |
 | `just test-live [args]` | Run tests against a real CML server (`USE_MOCKS=false`) |
 | `just check` | `black --check`, `isort --check-only`, `flake8` over `src/` and `tests/` |
+| `just pre-commit` | Run all pre-commit hooks on every file (`pre-commit run --all-files`) |
 | `just build` | Build wheel + multi-arch Docker image |
 | `just clean` / `just fresh` | Remove caches/venv (prompts for confirmation) |
 
@@ -202,9 +213,9 @@ Mock tests live under `tests/mocks/`, one JSON file per tool. To record a new on
 
 See [tests/MOCK_FRAMEWORK.md](tests/MOCK_FRAMEWORK.md) for the full mock dispatch pattern.
 
-## Bumping `virl2_client` / Regenerating CML Schemas
+## Bumping CML Schemas
 
-When you upgrade `virl2_client` (or otherwise refresh `src/cml_mcp/cml/`), some Pydantic models may gain, lose, or change fields. Each flattened tool that mirrors one of those models needs a corresponding update.
+When CML schemas change — regenerated `src/cml_mcp/cml/` on upstream, or updated `simple_webserver` on the internal fork — some Pydantic models may gain, lose, or change fields. Each flattened tool that mirrors one of those models needs a corresponding update.
 
 [AGENTS.md](AGENTS.md#sample-prompt-for-agents-auditing-a-schema-bump) contains a step-by-step prompt you can paste into your agent of choice (or follow manually). The high-level checklist:
 
@@ -279,7 +290,7 @@ See [tests/README.md](tests/README.md) and [tests/QUICK_START.md](tests/QUICK_ST
 - **isort** — import sorting
 - **flake8** — linting
 
-All three are configured in [pyproject.toml](pyproject.toml). Auto-generated schemas under `src/cml_mcp/cml/` are excluded.
+All three are configured in [pyproject.toml](pyproject.toml) (flake8 rules in [.flake8](.flake8)). Auto-generated schemas under `src/cml_mcp/cml/` are excluded.
 
 `just check` runs all three in `--check` mode. To auto-fix formatting:
 
@@ -287,6 +298,19 @@ All three are configured in [pyproject.toml](pyproject.toml). Auto-generated sch
 uv run black src/ tests/
 uv run isort src/ tests/
 ```
+
+### Pre-commit hooks
+
+[`.pre-commit-config.yaml`](.pre-commit-config.yaml) mirrors `just check` (black, isort, flake8) plus trailing-whitespace, end-of-file-fixer, and check-yaml. Install once per clone:
+
+```sh
+just dev-install
+uv run pre-commit install    # from the cml-mcp repo root
+```
+
+On each `git commit`, staged files are linted and auto-fixed where possible (black/isort). Run the full suite manually with `just pre-commit` or `uv run pre-commit run --all-files`.
+
+**Submodule vs monorepo:** `packaging/mcp_server` is a git submodule inside the CML `simple` monorepo. The monorepo's root [`.pre-commit-config.yaml`](https://github.com/CiscoModelingLabs/simple/blob/master/.pre-commit-config.yaml) uses ruff and other hooks for the wider tree — it does **not** replace this config. Install hooks from **this** directory when working on `cml-mcp`; root `simple` hooks and submodule hooks are independent.
 
 ## Project Structure
 

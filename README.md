@@ -24,7 +24,7 @@ This is accomplished through the [Model Context Protocol (MCP)](https://modelcon
 - **Link Management:** Connect nodes, configure link conditioning (bandwidth, latency, jitter, loss), and control link states.
 - **Packet Capture:** Start, stop, and retrieve packet captures (PCAP) from network links for traffic analysis with Wireshark or other tools.
 - **Node Configuration:** Configure node startup configurations and send CLI commands to running devices.
-- **Run Commands on Devices:** Using [PyATS](https://developer.cisco.com/pyats/), MCP clients can execute commands on virtual devices within CML labs.
+- **Run Commands on Devices:** MCP clients execute CLI commands on virtual devices via the CML native API (2.11+). Install `cml-mcp[pyats]` only when connecting to controllers older than 2.11.
 - **Console Log Access:** Retrieve console logs from running nodes for troubleshooting and monitoring, with support for selecting specific serial console ports.
 - **Modular Architecture:** Tools are organized into logical modules (labs, nodes, links, pcap, etc.) for maintainability and extensibility.
 - **Access Control Lists (HTTP Mode):** When running in HTTP transport mode, you can restrict which users can access which tools using a YAML-based ACL configuration file.
@@ -44,7 +44,7 @@ The easiest way to get started is using `uvx` with Claude Desktop (or other MCP-
           "type": "stdio",                                                          
           "command": "uvx",
           "args": [                                                                 
-            "cml-mcp[pyats]"                                                        
+            "cml-mcp"                                                        
           ],                                                                        
           "env": {
             "CML_URL": "{CML_URL}",                           
@@ -68,7 +68,7 @@ The easiest way to get started is using `uvx` with Claude Desktop (or other MCP-
 
 **Need more capabilities?**
 
-- For **device CLI command execution**, use `cml-mcp[pyats]` instead of `cml-mcp` in the args
+- For **device CLI on controllers older than 2.11**, use `cml-mcp[pyats]` instead of `cml-mcp` in the args
 - For **Docker, Windows (WSL), or HTTP server mode**, see [INSTALLATION.md](https://github.com/xorrkaz/cml-mcp/blob/main/INSTALLATION.md)
 
 **Where to find your configuration file:**
@@ -237,11 +237,11 @@ uvx cml-mcp[pyats]  # For uvx installations
 
 TLS certificate verification is **enabled by default** (`CML_VERIFY_SSL=true`). Because CML ships with a self-signed certificate, verification will fail out of the box with an SSL error. Set `CML_VERIFY_SSL=false` in your environment configuration to disable verification, or install a CA-signed certificate on your CML server (alternatively, set `CA_BUNDLE` to a file containing your self-signed certificate).
 
-#### PyATS command execution fails
+#### CLI command execution fails
 
-1. Ensure PyATS is installed with `cml-mcp[pyats]`
-2. Verify `PYATS_USERNAME`, `PYATS_PASSWORD`, and `PYATS_AUTH_PASS` are set correctly
-3. On Windows, use WSL or Docker for PyATS support
+1. On CML 2.11+, native CLI should work without PyATS — verify the node is BOOTED and the label is correct
+2. On controllers older than 2.11, install `cml-mcp[pyats]` and set `PYATS_USERNAME`, `PYATS_PASSWORD`, and `PYATS_AUTH_PASS`
+3. On Windows, use WSL or Docker for the pyATS fallback path
 
 For more troubleshooting help, see [INSTALLATION.md](https://github.com/xorrkaz/cml-mcp/blob/main/INSTALLATION.md).
 
