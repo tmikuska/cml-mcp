@@ -48,7 +48,8 @@ from cml_mcp.cml.simple_webserver.schemas.links import LinkResponse
 from cml_mcp.cml.simple_webserver.schemas.node_definitions import NodeDefinition
 from cml_mcp.cml.simple_webserver.schemas.nodes import Node
 from cml_mcp.cml.simple_webserver.schemas.pcap import PCAPItem, PCAPStatusResponse
-from cml_mcp.cml.simple_webserver.schemas.system import SystemHealth, SystemInformation, SystemStats
+from cml_mcp.cml.simple_common.schemas.system_health import SystemHealth
+from cml_mcp.cml.simple_webserver.schemas.system import SystemInformation, SystemStats
 from cml_mcp.cml.simple_webserver.schemas.topologies import Topology
 from cml_mcp.cml.simple_webserver.schemas.users import UserResponse
 from cml_mcp.types import SimplifiedInterfaceResponse, SuperSimplifiedNodeDefinitionResponse
