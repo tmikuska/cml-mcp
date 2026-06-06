@@ -38,6 +38,7 @@ from cml_mcp.settings import settings
 from cml_mcp.tools import dependencies  # noqa: F401 - imported for side effects (global client init)
 from cml_mcp.tools import (
     annotations,
+    auth,
     cli,
     interfaces,
     labs,
@@ -57,7 +58,11 @@ logger.setLevel(loglevel)
 # Configure handler with format that will cascade to all cml-mcp.* loggers
 if not logger.handlers:
     handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(threadName)s %(name)s: %(message)s"))
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(threadName)s %(name)s [request_id=%(request_id)s]: %(message)s"))
+    # Injects the per-HTTP-request correlation id (see tools/dependencies.new_request_id /
+    # tools/middleware.py) into every log record emitted through this handler, so audit and
+    # diagnostic lines for the same request can be correlated even under concurrent load.
+    handler.addFilter(dependencies.RequestIdLogFilter())
     logger.addHandler(handler)
     # Allow propagation to ensure all child loggers (cml-mcp.*) inherit this configuration
     logger.propagate = False  # Don't propagate to root, but children will inherit our handler
@@ -98,4 +103,5 @@ links.register_tools(server_mcp)
 annotations.register_tools(server_mcp)
 pcap.register_tools(server_mcp)
 cli.register_tools(server_mcp)
+auth.register_tools(server_mcp)
 logger.info("All tools registered successfully")

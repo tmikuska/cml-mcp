@@ -26,6 +26,7 @@ Usage:
   pytest -m live_only tests/test_cml_mcp.py
 """
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,7 @@ from fastmcp.client.transports import FastMCPTransport
 from inline_snapshot import snapshot  # , outsource
 from mcp.types import TextContent
 
+from cml_mcp.cml.simple_common.schemas.system_health import SystemHealth
 from cml_mcp.cml.simple_webserver.schemas.annotations import (
     EllipseAnnotationResponse,
     LineAnnotationResponse,
@@ -48,7 +50,7 @@ from cml_mcp.cml.simple_webserver.schemas.links import LinkResponse
 from cml_mcp.cml.simple_webserver.schemas.node_definitions import NodeDefinition
 from cml_mcp.cml.simple_webserver.schemas.nodes import Node
 from cml_mcp.cml.simple_webserver.schemas.pcap import PCAPItem, PCAPStatusResponse
-from cml_mcp.cml.simple_webserver.schemas.system import SystemHealth, SystemInformation, SystemStats
+from cml_mcp.cml.simple_webserver.schemas.system import SystemInformation, SystemStats
 from cml_mcp.cml.simple_webserver.schemas.topologies import Topology
 from cml_mcp.cml.simple_webserver.schemas.users import UserResponse
 from cml_mcp.types import SimplifiedInterfaceResponse, SuperSimplifiedNodeDefinitionResponse
@@ -68,10 +70,43 @@ def _to_model(obj, cls):
     return cls.model_validate(obj, from_attributes=True)
 
 
+def _tool_text(result) -> str:
+    """Extract plain text from a FastMCP tool result."""
+    if isinstance(result.data, str):
+        return result.data
+    if result.content and isinstance(result.content[0], TextContent):
+        return result.content[0].text
+    return str(result.data or "")
+
+
+async def _is_ping_reachable(
+    main_mcp_client: Client[FastMCPTransport],
+    lab_id: UUID4Type,
+    label: str,
+    target: str,
+    timeout: float = 60.0,
+    interval: float = 3.0,
+) -> str:
+    """Retry ping until IOS reports success or *timeout* expires."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    last_out = ""
+    command = f"ping {target} repeat 3"
+    while asyncio.get_running_loop().time() < deadline:
+        result = await main_mcp_client.call_tool(
+            name="send_cli_command",
+            arguments={"lab_id": lab_id, "label": label, "commands": command},
+        )
+        last_out = _tool_text(result)
+        if "!" in last_out or "success rate is 100 percent" in last_out.lower():
+            return last_out
+        await asyncio.sleep(interval)
+    pytest.fail(f"Ping to {target} from {label} did not succeed within {timeout}s; " f"last output: {last_out!r}")
+
+
 async def test_list_tools(main_mcp_client: Client[FastMCPTransport]):
     list_tools = await main_mcp_client.list_tools()
 
-    assert len(list_tools) == snapshot(51)
+    assert len(list_tools) == snapshot(52)
 
 
 async def test_get_cml_labs(main_mcp_client: Client[FastMCPTransport], created_lab: UUID4Type):
@@ -112,7 +147,7 @@ async def test_user_mgmt(main_mcp_client: Client[FastMCPTransport]):
     assert len(result.content) > 0
     assert isinstance(result.content[0], TextContent)
     user_id = UUID4Type(result.content[0].text)
-    del_result = await main_mcp_client.call_tool(name="delete_cml_user", arguments={"user_id": user_id})
+    del_result = await main_mcp_client.call_tool(name="delete_cml_user", arguments={"user_id": user_id, "confirm": True})
     assert del_result.data is True
 
     result = await main_mcp_client.call_tool(
@@ -123,7 +158,7 @@ async def test_user_mgmt(main_mcp_client: Client[FastMCPTransport]):
     assert len(result.content) > 0
     assert isinstance(result.content[0], TextContent)
     user_id = UUID4Type(result.content[0].text)
-    del_result = await main_mcp_client.call_tool(name="delete_cml_user", arguments={"user_id": user_id})
+    del_result = await main_mcp_client.call_tool(name="delete_cml_user", arguments={"user_id": user_id, "confirm": True})
     assert del_result.data is True
 
 
@@ -148,7 +183,7 @@ async def test_get_cml_groups(main_mcp_client: Client[FastMCPTransport]):
         assert isinstance(group, GroupResponse)
 
     # clean-up
-    _ = await main_mcp_client.call_tool(name="delete_cml_group", arguments={"group_id": group.id})
+    _ = await main_mcp_client.call_tool(name="delete_cml_group", arguments={"group_id": group.id, "confirm": True})
 
 
 @pytest.mark.live_only
@@ -161,7 +196,7 @@ async def test_group_mgmt(main_mcp_client: Client[FastMCPTransport]):
     assert len(result.content) > 0
     assert isinstance(result.content[0], TextContent)
     group_id = UUID4Type(result.content[0].text)
-    del_result = await main_mcp_client.call_tool(name="delete_cml_group", arguments={"group_id": group_id})
+    del_result = await main_mcp_client.call_tool(name="delete_cml_group", arguments={"group_id": group_id, "confirm": True})
     assert del_result.data is True
 
     result = await main_mcp_client.call_tool(
@@ -172,7 +207,7 @@ async def test_group_mgmt(main_mcp_client: Client[FastMCPTransport]):
     assert len(result.content) > 0
     assert isinstance(result.content[0], TextContent)
     group_id = UUID4Type(result.content[0].text)
-    del_result = await main_mcp_client.call_tool(name="delete_cml_group", arguments={"group_id": group_id})
+    del_result = await main_mcp_client.call_tool(name="delete_cml_group", arguments={"group_id": group_id, "confirm": True})
     assert del_result.data is True
 
 
@@ -433,7 +468,7 @@ async def test_full_cml_topology(main_mcp_client: Client[FastMCPTransport]):
     lab_id = UUID4Type(result.content[0].text)
 
     # Clean up - delete the lab
-    del_result = await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": lab_id})
+    del_result = await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": lab_id, "confirm": True})
     assert del_result.data is True
 
 
@@ -616,15 +651,15 @@ def _line_annotation_payload(border_style: str) -> dict:
 
 
 @pytest.mark.live_only
-async def test_cml_api_rejects_canonical_border_style_direct(live_cml_api_client, created_lab: UUID4Type):
-    """CML REST API rejects dashed without legacy wire conversion."""
+async def test_cml_api_accepts_canonical_border_style_direct(live_cml_api_client, created_lab: UUID4Type):
+    """CML REST API accepts canonical dashed border_style wire values."""
     await live_cml_api_client.check_authentication()
     url = f"{live_cml_api_client.api_base}/labs/{created_lab}/annotations"
     resp = await live_cml_api_client.client.post(
         url,
         json=_line_annotation_payload("dashed"),
     )
-    assert resp.status_code == 400, resp.text
+    assert resp.status_code in {200, 201}, resp.text
 
 
 @pytest.mark.live_only
@@ -736,46 +771,56 @@ async def test_connect_two_nodes(main_mcp_client: Client[FastMCPTransport], crea
     for link in link_result.data:
         link = _to_model(link, LinkResponse)
         assert isinstance(link, LinkResponse)
+    link_id = _to_model(link_result.data[0], LinkResponse).id
 
     _ = await main_mcp_client.call_tool(
         name="start_cml_lab",
         arguments={"lab_id": lab_id, "wait_for_convergence": True},
     )
 
+    # Lab convergence waits on nodes only; packet capture needs LinkState.STARTED.
+    link_start = await main_mcp_client.call_tool(
+        name="start_cml_link",
+        arguments={"lab_id": lab_id, "link_id": link_id},
+    )
+    assert link_start.data is True
+
+    await _is_ping_reachable(main_mcp_client, lab_id, "MCP Test Node 1", "192.0.2.2")
+
     capture_result = await main_mcp_client.call_tool(
         name="start_packet_capture",
         arguments={
             "lab_id": lab_id,
-            "link_id": _to_model(link_result.data[0], LinkResponse).id,
+            "link_id": link_id,
             "maxpackets": 100,  # we don't need 100, but we don't want it to stop too early either
             "bpfilter": "icmp",
         },
     )
     assert capture_result.data is True
 
-    _ = await main_mcp_client.call_tool(
+    ping = await main_mcp_client.call_tool(
         name="send_cli_command",
-        arguments={"lab_id": lab_id, "label": "MCP Test Node 1", "commands": "ping 192.0.2.2"},
+        arguments={"lab_id": lab_id, "label": "MCP Test Node 1", "commands": "ping 192.0.2.2 repeat 10"},
     )
+    ping_out = _tool_text(ping)
+    assert "!" in ping_out or "success rate is 100 percent" in ping_out.lower()
+
+    await asyncio.sleep(5)
 
     pcap_status = await main_mcp_client.call_tool(
         name="check_packet_capture_status",
-        arguments={
-            "lab_id": lab_id,
-            "link_id": _to_model(link_result.data[0], LinkResponse).id,
-        },
+        arguments={"lab_id": lab_id, "link_id": link_id},
     )
-    # outsource(pcap_status.structured_content, ".json")
     if isinstance(pcap_status.structured_content, dict):
         pcap_status.structured_content = PCAPStatusResponse(**pcap_status.structured_content)
     assert isinstance(pcap_status.structured_content, PCAPStatusResponse)
-    assert pcap_status.structured_content.packetscaptured >= 5  # should be at least 5 packets from the ping
+    assert pcap_status.structured_content.packetscaptured >= 5  # ping should produce multiple ICMP frames
 
     stop_result = await main_mcp_client.call_tool(
         name="stop_packet_capture",
         arguments={
             "lab_id": lab_id,
-            "link_id": _to_model(link_result.data[0], LinkResponse).id,
+            "link_id": link_id,
         },
     )
     assert stop_result.data is True
@@ -784,7 +829,7 @@ async def test_connect_two_nodes(main_mcp_client: Client[FastMCPTransport], crea
         name="get_captured_packet_overview",
         arguments={
             "lab_id": lab_id,
-            "link_id": _to_model(link_result.data[0], LinkResponse).id,
+            "link_id": link_id,
         },
     )
     # outsource(packet_overview.data, ".json")
@@ -802,7 +847,7 @@ async def test_connect_two_nodes(main_mcp_client: Client[FastMCPTransport], crea
         name="apply_link_conditioning",
         arguments={
             "lab_id": lab_id,
-            "link_id": _to_model(link_result.data[0], LinkResponse).id,
+            "link_id": link_id,
             "enabled": True,
             "bandwidth": 1000,
             "latency": 50,
@@ -844,7 +889,6 @@ async def test_get_nodes_for_cml_lab(main_mcp_client: Client[FastMCPTransport], 
 
 
 @pytest.mark.mock_only
-@pytest.mark.asyncio
 async def test_download_lab_topology(main_mcp_client: Client[FastMCPTransport], created_lab: UUID4Type):
     """Test downloading a lab topology as YAML."""
     lab_id = created_lab
@@ -864,7 +908,6 @@ async def test_download_lab_topology(main_mcp_client: Client[FastMCPTransport], 
 
 
 @pytest.mark.mock_only
-@pytest.mark.asyncio
 async def test_clone_cml_lab(main_mcp_client: Client[FastMCPTransport], created_lab: UUID4Type):
     """Test cloning a CML lab with a router node."""
     source_lab_id = created_lab
@@ -892,12 +935,11 @@ async def test_clone_cml_lab(main_mcp_client: Client[FastMCPTransport], created_
     assert cloned_lab_id != source_lab_id
 
     # Clean up - delete clone lab
-    del_result = await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": cloned_lab_id})
+    del_result = await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": cloned_lab_id, "confirm": True})
     assert del_result.data is True
 
 
 @pytest.mark.live_only
-@pytest.mark.asyncio
 async def test_download_lab_topology_live(main_mcp_client: Client[FastMCPTransport], created_lab: UUID4Type):
     """Test downloading a lab topology as YAML against live CML server."""
     lab_id = created_lab
@@ -919,7 +961,6 @@ async def test_download_lab_topology_live(main_mcp_client: Client[FastMCPTranspo
 
 
 @pytest.mark.live_only
-@pytest.mark.asyncio
 async def test_clone_cml_lab_live(main_mcp_client: Client[FastMCPTransport], created_lab: UUID4Type):
     """Test cloning a CML lab with a router node against live CML server."""
     source_lab_id = created_lab
@@ -952,5 +993,5 @@ async def test_clone_cml_lab_live(main_mcp_client: Client[FastMCPTransport], cre
     assert len(cloned_nodes.content) > 0
 
     # Clean up - delete both labs (source is deleted in fixture)
-    del_result = await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": cloned_lab_id})
+    del_result = await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": cloned_lab_id, "confirm": True})
     assert del_result.data is True

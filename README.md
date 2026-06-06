@@ -24,7 +24,7 @@ This is accomplished through the [Model Context Protocol (MCP)](https://modelcon
 - **Link Management:** Connect nodes, configure link conditioning (bandwidth, latency, jitter, loss), and control link states.
 - **Packet Capture:** Start, stop, and retrieve packet captures (PCAP) from network links for traffic analysis with Wireshark or other tools.
 - **Node Configuration:** Configure node startup configurations and send CLI commands to running devices.
-- **Run Commands on Devices:** Using [PyATS](https://developer.cisco.com/pyats/), MCP clients can execute commands on virtual devices within CML labs.
+- **Run Commands on Devices:** MCP clients execute CLI commands on virtual devices via the CML native `/cli` API. Requires a current CML controller (2.11). No pyATS or `virl2_client`.
 - **Console Log Access:** Retrieve console logs from running nodes for troubleshooting and monitoring, with support for selecting specific serial console ports.
 - **Modular Architecture:** Tools are organized into logical modules (labs, nodes, links, pcap, etc.) for maintainability and extensibility.
 - **Access Control Lists (HTTP Mode):** When running in HTTP transport mode, you can restrict which users can access which tools using a YAML-based ACL configuration file.
@@ -44,7 +44,7 @@ The easiest way to get started is using `uvx` with Claude Desktop (or other MCP-
           "type": "stdio",                                                          
           "command": "uvx",
           "args": [                                                                 
-            "cml-mcp[pyats]"                                                        
+            "cml-mcp"                                                        
           ],                                                                        
           "env": {
             "CML_URL": "{CML_URL}",                           
@@ -60,16 +60,13 @@ The easiest way to get started is using `uvx` with Claude Desktop (or other MCP-
 **Important:** Replace the placeholder values with your actual CML server details:
 
 - `CML_URL`: Your CML server address (e.g., `https://cml.example.com` or `https://10.10.20.50`)
-- `CML_USERNAME` and `CML_PASSWORD`: Your CML login credentials
+- `CML_USERNAME` and `CML_PASSWORD`: Your CML login credentials. Alternatively, set `CML_JWT` to a long-lived CML API token (personal access token) instead -- see [INSTALLATION.md](https://github.com/xorrkaz/cml-mcp/blob/main/INSTALLATION.md) for details. Configure exactly one of the two methods.
 - `CML_VERIFY_SSL`: TLS certificate verification now defaults to `"true"`. CML ships with a self-signed certificate out of the box, so **most users need to set this to `"false"`** (as shown above). Leave it at `"true"` only if you have installed a CA-signed certificate on your CML server (or point `CA_BUNDLE` at a file containing your self-signed certificate).
 
 > [!TIP]
 > **"Command not found" for `uvx`?** MCP clients like Claude Desktop run in a restricted environment that does not always inherit your shell's `PATH`. If `uvx` can't be found, use its full path in the `"command"` field. To find it, run `which uvx` in a terminal on macOS/Linux, or `where uvx` in Command Prompt on Windows (e.g., `"/Users/alice/.local/bin/uvx"` on macOS, `"C:\Users\alice\.local\bin\uvx.exe"` on Windows). The same applies to `uv`, `npx`, or any other command used in MCP configurations.
 
-**Need more capabilities?**
-
-- For **device CLI command execution**, use `cml-mcp[pyats]` instead of `cml-mcp` in the args
-- For **Docker, Windows (WSL), or HTTP server mode**, see [INSTALLATION.md](https://github.com/xorrkaz/cml-mcp/blob/main/INSTALLATION.md)
+**Need more capabilities?** For Docker or HTTP server mode, see [INSTALLATION.md](https://github.com/xorrkaz/cml-mcp/blob/main/INSTALLATION.md).
 
 **Where to find your configuration file:**
 
@@ -80,12 +77,12 @@ The easiest way to get started is using `uvx` with Claude Desktop (or other MCP-
 ### Requirements
 
 - **Python 3.12, 3.13, or 3.14**
-- **Cisco Modeling Labs (CML) 2.9 or later**
+- **Cisco Modeling Labs (CML) 2.11**
 - **[uv](https://docs.astral.sh/uv/)** - Python package manager
 
 ## Available MCP Tools
 
-The server provides 51 MCP tools organized into the following categories:
+The server provides 52 MCP tools organized into the following categories:
 
 ### Lab Management
 
@@ -96,8 +93,8 @@ The server provides 51 MCP tools organized into the following categories:
 - **set_cml_lab_permissions** - Configure group/user access (LAB_ADMIN, LAB_EDIT, LAB_EXEC, LAB_VIEW)
 - **start_cml_lab** - Start all nodes in a lab
 - **stop_cml_lab** - Stop all nodes in a lab
-- **wipe_cml_lab** - Wipe all node data/configurations (prompts for confirmation if client supports it)
-- **delete_cml_lab** - Delete a lab (prompts for confirmation if client supports it)
+- **wipe_cml_lab** - Wipe all node data/configurations (destructive; requires confirm=true, see Destructive tool confirmation below)
+- **delete_cml_lab** - Delete a lab (destructive; requires confirm=true, see Destructive tool confirmation below)
 - **get_cml_lab_by_title** - Find a lab by its title
 - **download_lab_topology** - Download lab topology as YAML file
 - **clone_cml_lab** - Clone a lab with optional new title
@@ -111,10 +108,10 @@ The server provides 51 MCP tools organized into the following categories:
 - **configure_cml_node** - Set node startup configuration
 - **start_cml_node** - Start a specific node
 - **stop_cml_node** - Stop a specific node
-- **wipe_cml_node** - Wipe node data (prompts for confirmation if client supports it)
-- **delete_cml_node** - Delete a node (prompts for confirmation if client supports it)
+- **wipe_cml_node** - Wipe node data (destructive; requires confirm=true, see Destructive tool confirmation below)
+- **delete_cml_node** - Delete a node (destructive; requires confirm=true, see Destructive tool confirmation below)
 - **get_console_log** - Get console output history for a node; optional `console` index selects the serial port (default `0`; Docker-based nodes often use both `0` and `1`)
-- **send_cli_command** - Execute CLI commands on running nodes (requires PyATS); optional `console` index selects which serial port to use
+- **send_cli_command** - Execute CLI commands on running nodes via the native `/cli` API; optional `console` index selects which serial port to use
 
 ### Interface & Link Management
 
@@ -133,7 +130,7 @@ The server provides 51 MCP tools organized into the following categories:
 - **add_rectangle_annotation** - Add a rectangle annotation
 - **add_ellipse_annotation** - Add an ellipse annotation
 - **add_line_annotation** - Add a line annotation
-- **delete_annotation_from_lab** - Delete an annotation (prompts for confirmation if client supports it)
+- **delete_annotation_from_lab** - Delete an annotation (destructive; requires confirm=true, see Destructive tool confirmation below)
 
 ### Packet Capture (PCAP)
 
@@ -147,10 +144,10 @@ The server provides 51 MCP tools organized into the following categories:
 
 - **get_cml_users** - List all CML users
 - **create_cml_user** - Create a new user (requires admin)
-- **delete_cml_user** - Delete a user (requires admin, prompts for confirmation if client supports it)
+- **delete_cml_user** - Delete a user (requires admin; destructive, requires confirm=true, see Destructive tool confirmation below)
 - **get_cml_groups** - List all CML groups
 - **create_cml_group** - Create a new group (requires admin)
-- **delete_cml_group** - Delete a group (requires admin, prompts for confirmation if client supports it)
+- **delete_cml_group** - Delete a group (requires admin; destructive, requires confirm=true, see Destructive tool confirmation below)
 
 ### System Information
 
@@ -158,6 +155,19 @@ The server provides 51 MCP tools organized into the following categories:
 - **get_cml_status** - Get system health indicators
 - **get_cml_statistics** - Get resource usage and lab/node/link counts
 - **get_cml_licensing_details** - Get licensing information and limits
+
+### Destructive tool confirmation
+
+Every `wipe_*`/`delete_*` tool requires an explicit two-stage confirmation: the first call
+(omitting `confirm`, or `confirm=false`) always fails with a `ToolError` describing the
+irreversible effect and instructing the caller to re-invoke with `confirm=true`. A tool-calling
+LLM is expected to relay that error to the user, get an explicit "yes", and only then re-call
+the tool with `confirm=true` to actually perform the action. See [DEVELOPMENT.md](DEVELOPMENT.md#two-stage-confirm-for-destructive-tools)
+for the full rationale and pattern.
+
+### Authentication
+
+- **set_cml_jwt** - Replace the CML API token used for the current session with a new one, without restarting the MCP server (recovers from a token that expired mid-session or after a restart)
 
 ## Usage
 
@@ -225,23 +235,15 @@ For development setup, testing, and code style information, see [DEVELOPMENT.md]
 
 ### Common Issues
 
-#### "Module not found" or import errors
-
-Make sure you've installed the package with all extras if you need PyATS support:
-
-```sh
-uvx cml-mcp[pyats]  # For uvx installations
-```
-
 #### SSL Certificate Errors
 
 TLS certificate verification is **enabled by default** (`CML_VERIFY_SSL=true`). Because CML ships with a self-signed certificate, verification will fail out of the box with an SSL error. Set `CML_VERIFY_SSL=false` in your environment configuration to disable verification, or install a CA-signed certificate on your CML server (alternatively, set `CA_BUNDLE` to a file containing your self-signed certificate).
 
-#### PyATS command execution fails
+#### CLI command execution fails
 
-1. Ensure PyATS is installed with `cml-mcp[pyats]`
-2. Verify `PYATS_USERNAME`, `PYATS_PASSWORD`, and `PYATS_AUTH_PASS` are set correctly
-3. On Windows, use WSL or Docker for PyATS support
+1. Confirm the controller is CML 2.11 — this server does not support older controllers
+2. Verify the node is BOOTED and the label matches (not the UUID)
+3. `send_cli_command` uses `POST /labs/{id}/nodes/{id}/cli`; no extra packages or device SSH credentials are required
 
 For more troubleshooting help, see [INSTALLATION.md](https://github.com/xorrkaz/cml-mcp/blob/main/INSTALLATION.md).
 

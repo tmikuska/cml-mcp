@@ -29,13 +29,17 @@ Middleware module for HTTP request handling and ACL management.
 import base64
 import hashlib
 import logging
+import os
 import re
+import stat
+import time
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any, Sequence
 
 import yaml
 from fastmcp.exceptions import ToolError
-from fastmcp.server.dependencies import get_http_headers
+from fastmcp.server.dependencies import get_http_headers, get_http_request
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.tools.base import Tool
 from mcp.shared.exceptions import McpError
@@ -44,14 +48,93 @@ from pydantic import AnyHttpUrl, TypeAdapter, ValidationError
 
 from cml_mcp.cml_client import CMLClient
 from cml_mcp.settings import settings
+from cml_mcp.tools import dependencies
+from cml_mcp.tools.cache import _redact_key
 
 logger = logging.getLogger("cml-mcp.middleware")
 
 # Adapter used to parse client-provided CML URLs into their scheme/host/port parts.
 _url_adapter = TypeAdapter(AnyHttpUrl)
 
+
+class _SlidingWindowRateLimiter:
+    """
+    Minimal in-memory sliding-window rate limiter, keyed by an arbitrary string (e.g. client
+    IP or username). Not shared across worker processes; adequate for the single-worker
+    deployment this server documents (see Justfile/entrypoint.sh --workers 1).
+    """
+
+    def __init__(self, max_attempts: int, window_seconds: int) -> None:
+        self.max_attempts = max_attempts
+        self.window_seconds = window_seconds
+        self._hits: dict[str, deque] = defaultdict(deque)
+        # Bounded-work housekeeping: once the number of tracked keys crosses this soft cap we
+        # run a single full sweep dropping fully-expired buckets. This keeps _hits from growing
+        # without bound under a stream of distinct one-shot keys (e.g. rotating source IPs on a
+        # direct bind, or many usernames) that are never revisited to prune themselves.
+        self._sweep_threshold = 1024
+
+    def _sweep_expired(self, now: float) -> None:
+        stale = [key for key, hits in self._hits.items() if not hits or now - hits[-1] > self.window_seconds]
+        for key in stale:
+            del self._hits[key]
+
+    def allow(self, key: str) -> bool:
+        now = time.monotonic()
+        if len(self._hits) >= self._sweep_threshold:
+            self._sweep_expired(now)
+        hits = self._hits[key]
+        while hits and now - hits[0] > self.window_seconds:
+            hits.popleft()
+        if len(hits) >= self.max_attempts:
+            return False
+        hits.append(now)
+        return True
+
+
+# Per-IP and per-username rate limiters guarding the authentication path. Constructed once at
+# import from the CML_MCP_RATE_LIMIT_* settings (read at process startup); a single-worker
+# deployment (see Justfile/entrypoint.sh --workers 1) keeps this in-process state authoritative.
+# Note: these are NOT rebuilt if settings change at runtime -- unit tests that need different
+# limits construct their own _SlidingWindowRateLimiter instead of mutating settings.
+_ip_rate_limiter = _SlidingWindowRateLimiter(settings.cml_mcp_rate_limit_max_attempts, settings.cml_mcp_rate_limit_window)
+_user_rate_limiter = _SlidingWindowRateLimiter(settings.cml_mcp_rate_limit_max_attempts, settings.cml_mcp_rate_limit_window)
+
+
+def _enforce_auth_rate_limit(client_ip: str, username: str | None = None, user_log_id: str = "-") -> None:
+    """
+    Charge a failed/new auth attempt against the per-IP (and, when a username is given, the
+    per-username) sliding-window limiter, raising McpError if either budget is exhausted.
+    Centralizes the identical reject used at every unauthenticated/failed-credential branch.
+    """
+    if not _ip_rate_limiter.allow(client_ip):
+        logger.warning("Request rejected: rate limit exceeded for client IP %s", client_ip)
+        raise McpError(ErrorData(message="Too many authentication attempts; try again later.", code=-31006))
+    if username is not None and not _user_rate_limiter.allow(username):
+        logger.warning("Request rejected: rate limit exceeded for user %s", user_log_id)
+        raise McpError(ErrorData(message="Too many authentication attempts; try again later.", code=-31006))
+
+
 # ACL data
 acl_data: dict[str, Any] = {}
+# Set to True when an ACL file was configured (CML_MCP_ACL_FILE) but could not be loaded safely
+# (unsafe ownership/permissions, missing file, empty file, or a YAML parse error). This is
+# distinct from "no ACL file configured" (acl_data stays empty and all tools are allowed): once an
+# operator has opted into ACL enforcement, a broken/invalid file must fail closed (deny every
+# tool) rather than silently falling back to "no ACLs".
+acl_load_failed: bool = False
+
+
+def token_cache_key(jwt: str, cache_key_suffix: str) -> str:
+    """
+    Build the cml_client_cache key for a token-authenticated client.
+
+    Shared between on_request() (initial caching) and the set_cml_jwt tool
+    (re-keying after set_jwt() rotates a cached client's credentials in place),
+    so both sides always agree on the exact key format.
+    """
+    token_hash = hashlib.sha256(jwt.encode()).hexdigest()
+    return f"token:{token_hash}:{cache_key_suffix}"
 
 
 def _validate_acl_data(raw_acl_data: dict | None) -> dict | None:
@@ -67,17 +150,23 @@ def _validate_acl_data(raw_acl_data: dict | None) -> dict | None:
     if not raw_acl_data:
         return None
 
-    # Validate default_enabled
+    # Validate default_enabled. Unlike per-user tool-list validation below (which only skips
+    # the affected user), a malformed top-level field indicates the whole file is not what the
+    # operator intended -- silently substituting a default here would mean a typo'd config
+    # (e.g. `default_enabled: "false"`, a YAML string, not a bool) silently becomes the
+    # *opposite* of what was configured. Treat it as an invalid file (fail closed) instead.
+    if "default_enabled" in raw_acl_data and not isinstance(raw_acl_data["default_enabled"], bool):
+        logger.warning("Invalid default_enabled value in ACLs (must be a boolean); treating ACL file as invalid")
+        return None
     default_enabled = raw_acl_data.get("default_enabled", True)
-    if not isinstance(default_enabled, bool):
-        logger.warning("Invalid default_enabled value in ACLs; defaulting to True")
-        default_enabled = True
 
-    # Validate users structure
+    # Validate users structure. Same reasoning as above: a malformed top-level `users` block
+    # (e.g. a list instead of a mapping) means the file's rules can't be trusted, not "no
+    # per-user rules configured".
+    if "users" in raw_acl_data and not isinstance(raw_acl_data["users"], dict):
+        logger.warning("Invalid users structure in ACLs (must be a mapping); treating ACL file as invalid")
+        return None
     users = raw_acl_data.get("users", {})
-    if not isinstance(users, dict):
-        logger.warning("Invalid users structure in ACLs; using default_enabled with no user-specific rules")
-        users = {}
 
     # Validate each user's tool lists
     validated_users = {}
@@ -108,30 +197,111 @@ def _validate_acl_data(raw_acl_data: dict | None) -> dict | None:
     }
 
 
+def _check_acl_file_permissions(aclf: Path) -> str | None:
+    """
+    Verify the ACL file is safe to trust: either owned by the running user, or owned by root
+    (uid 0) -- the common case for a Docker bind mount, Kubernetes ConfigMap, or Secret, which
+    are typically root-owned regardless of the container's runtime USER -- and in either case
+    not writable by group or other. A root-owned, non-group/other-writable file could not have
+    been tampered with by the (non-root) process reading it, so it is exactly as trustworthy as
+    a self-owned file.
+
+    Returns an error message if the file fails the check, or None if it is safe to read.
+    """
+    try:
+        st = aclf.stat()
+    except OSError as e:
+        return f"could not stat ACL file: {e}"
+    if st.st_uid not in (os.getuid(), 0):
+        return f"ACL file {aclf} is not owned by the running user or root (uid={os.getuid()}, file uid={st.st_uid})"
+    if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        return f"ACL file {aclf} is group- or other-writable (mode={oct(st.st_mode & 0o777)}); refusing to load"
+    return None
+
+
 def load_acl_data() -> None:
     """Load ACL configuration from file if configured."""
-    if settings.cml_mcp_transport == "http":
-        if settings.cml_mcp_acl_file:
-            aclf = Path(settings.cml_mcp_acl_file)
-            if aclf.is_file():
-                try:
-                    with aclf.open("r", encoding="utf-8") as f:
-                        raw_acl_data = yaml.safe_load(f)
-                        validated_data = _validate_acl_data(raw_acl_data)
-                        if validated_data:
-                            acl_data.update(validated_data)
-                except Exception:
-                    logger.exception("Failed to load ACL file %s", aclf)
-                    acl_data.clear()
-            else:
-                logger.warning(
-                    "ACL file %s does not exist or is not a file. Continuing without ACLs.",
-                    aclf,
-                )
+    global acl_load_failed
+    if settings.cml_mcp_transport != "http" or not settings.cml_mcp_acl_file:
+        return
+
+    aclf = Path(settings.cml_mcp_acl_file)
+    if not aclf.is_file():
+        logger.critical(
+            "CML_MCP_ACL_FILE=%s was configured but does not exist or is not a regular file. Failing closed:"
+            " all tools will be denied until the file is fixed.",
+            aclf,
+        )
+        acl_load_failed = True
+        return
+
+    perm_error = _check_acl_file_permissions(aclf)
+    if perm_error:
+        logger.critical("Refusing to load ACL file: %s. Failing closed: all tools will be denied.", perm_error)
+        acl_load_failed = True
+        return
+
+    try:
+        with aclf.open("r", encoding="utf-8") as f:
+            raw_acl_data = yaml.safe_load(f)
+    except Exception:
+        logger.critical("Failed to parse ACL file %s. Failing closed: all tools will be denied.", aclf, exc_info=True)
+        acl_load_failed = True
+        return
+
+    if not raw_acl_data:
+        logger.critical(
+            "ACL file %s is empty or contains no data. Failing closed: all tools will be denied.",
+            aclf,
+        )
+        acl_load_failed = True
+        return
+
+    validated_data = _validate_acl_data(raw_acl_data)
+    if not validated_data:
+        logger.critical(
+            "ACL file %s did not contain a valid configuration after validation. Failing closed:" " all tools will be denied.",
+            aclf,
+        )
+        acl_load_failed = True
+        return
+
+    acl_data.update(validated_data)
+    acl_load_failed = False
 
 
 class CustomHttpRequestMiddleware(Middleware):
     """Custom middleware for HTTP request authentication and ACL enforcement."""
+
+    @staticmethod
+    def _validate_request_host(context: MiddlewareContext) -> None:
+        """
+        Validate the incoming Host/Origin headers against CML_MCP_ALLOWED_HOSTS to defend
+        against DNS-rebinding attacks (a page in the victim's browser resolving an
+        attacker-controlled DNS name to 127.0.0.1 and issuing same-origin requests against a
+        locally bound MCP server). No-op when CML_MCP_ALLOWED_HOSTS is empty.
+        """
+        if not settings.cml_mcp_allowed_hosts:
+            return
+        try:
+            request = get_http_request()
+        except RuntimeError:
+            return
+        # Host/Origin hostnames are case-insensitive (RFC 3986/7230); comparing raw case would
+        # reject legitimate requests whose Host header happens to differ only in case (e.g. a
+        # proxy that canonicalizes hostnames differently), without adding any real protection --
+        # an attacker gains nothing by *matching* the allow list's case exactly vs. not.
+        allowed_hosts = {h.lower() for h in settings.cml_mcp_allowed_hosts}
+        host = request.headers.get("host", "").lower()
+        origin = request.headers.get("origin")
+        if host not in allowed_hosts:
+            logger.warning("Request rejected: Host header '%s' is not in CML_MCP_ALLOWED_HOSTS", host)
+            raise McpError(ErrorData(message="Request rejected: untrusted Host header", code=-31005))
+        if origin is not None:
+            origin_host = origin.split("://", 1)[-1].lower()
+            if origin_host not in allowed_hosts:
+                logger.warning("Request rejected: Origin header '%s' is not in CML_MCP_ALLOWED_HOSTS", origin)
+                raise McpError(ErrorData(message="Request rejected: untrusted Origin header", code=-31005))
 
     @staticmethod
     def _validate_url(url: AnyHttpUrl | str, allowed_urls: list[AnyHttpUrl], url_pattern: str | None) -> None:
@@ -168,8 +338,14 @@ class CustomHttpRequestMiddleware(Middleware):
                 )
         if url_pattern:
             # Match against a canonical origin (no userinfo, path, or query).
+            # re.fullmatch (not re.match) is required: re.match only anchors the
+            # start of the string, so an operator pattern that omits a trailing
+            # "$" (e.g. "^https://cml\\.example\\.com") would still match a
+            # suffix-extended host such as "https://cml.example.com.attacker.tld:443"
+            # or a userinfo-prefixed host, letting a remote caller redirect the
+            # credential POST to an attacker-controlled origin.
             canonical = f"{target.scheme}://{target.host}:{target.port}"
-            if not re.match(url_pattern, canonical):
+            if not re.fullmatch(url_pattern, canonical):
                 raise McpError(
                     ErrorData(
                         message=f"CML server URL '{url}' does not match the required pattern",
@@ -183,6 +359,10 @@ class CustomHttpRequestMiddleware(Middleware):
         Check if a tool is enabled based on ACL configuration.
         ACL data is pre-validated at startup, so this method can trust the structure.
         """
+        if acl_load_failed:
+            # An ACL file was configured but could not be loaded safely (see load_acl_data()).
+            # Fail closed rather than silently falling back to "no ACLs configured".
+            return False
         if not acl_data:
             return True  # No ACLs defined, all tools enabled
 
@@ -208,38 +388,73 @@ class CustomHttpRequestMiddleware(Middleware):
         return default_enabled
 
     async def on_request(self, context: MiddlewareContext, call_next) -> Any:
-        # Import here to avoid circular dependency
-        from cml_mcp.tools.dependencies import (
-            _pyats_auth_pass,
-            _pyats_password,
-            _pyats_username,
-            _request_client,
-            cml_client_cache,
-        )
+        # Generate the audit-log correlation id as early as possible so every log line for
+        # this request -- including rejections below -- can be tied together.
+        dependencies.new_request_id()
+        dependencies.set_request_user_hash("-")  # Reset; set once the caller is authenticated, below.
+        dependencies.request_client.set(None)
 
-        # Reset PyATS contextvars for this request
-        _pyats_username.set(None)
-        _pyats_password.set(None)
-        _pyats_auth_pass.set(None)
+        try:
+            return await self._on_request_impl(context, call_next)
+        finally:
+            # Belt-and-suspenders reset: guarantees these context vars never leak into
+            # whatever runs next on this task/context, even for early-reject paths (bad
+            # Host, rate limit, malformed credentials) that never reach the nested
+            # try/finally further down that guards the authenticated call_next() path.
+            dependencies.set_request_user_hash("-")
+            dependencies.request_client.set(None)
+
+    async def _on_request_impl(self, context: MiddlewareContext, call_next) -> Any:
+        CustomHttpRequestMiddleware._validate_request_host(context)
+
+        try:
+            client_ip = get_http_request().client.host  # type: ignore[union-attr]
+        except (RuntimeError, AttributeError):
+            client_ip = "unknown"
 
         headers = get_http_headers(
             include={
                 "x-cml-server-url",
                 "x-cml-verify-ssl",
                 "x-authorization",
-                "x-pyats-authorization",
-                "x-pyats-enable",
             }
         )
         cml_url = headers.get("x-cml-server-url")
         auth_header = headers.get("x-authorization")
-        # Allow unauthenticated requests through for MCP protocol discovery
-        # (initialize, tools/list). Actual tool calls are guarded in on_call_tool.
-        if not cml_url and not settings.cml_url and not auth_header:
-            logger.debug("No CML credentials provided; allowing request for MCP protocol discovery")
-            _request_client.set(None)
-
+        # Allow only the base MCP protocol handshake (initialize/ping/notifications) through
+        # unauthenticated; actual capability discovery (tools/list) requires auth by default
+        # since tool descriptions/schemas can reveal internal capabilities. Set
+        # CML_MCP_ALLOW_ANON_DISCOVERY=true to let tools/list through unauthenticated as well
+        # (e.g. for a skills registry that needs to enumerate tools with no credentials).
+        _always_anon_methods = {"initialize", "notifications/initialized", "ping"}
+        anon_discovery_allowed = context.method in _always_anon_methods or (
+            context.method == "tools/list" and settings.cml_mcp_allow_anon_discovery
+        )
+        # The MCP protocol handshake (initialize/ping/notifications) never touches CML at all, so
+        # it must be reachable unauthenticated regardless of whether a default CML_URL happens to
+        # be configured server-side -- that configuration is irrelevant to whether the handshake
+        # can proceed. Only fall through to the credential checks below when this request isn't
+        # eligible for the anonymous-discovery bypass (or the caller supplied its own
+        # X-CML-Server-URL/X-Authorization, in which case it's trying to authenticate and should
+        # go through the normal path instead of being silently treated as anonymous).
+        if anon_discovery_allowed and not cml_url and not auth_header:
+            logger.debug("No CML credentials provided; allowing '%s' for MCP protocol discovery", context.method)
+            dependencies.request_client.set(None)
             return await call_next(context)
+        if not cml_url and not settings.cml_url and not auth_header:
+            # No credentials supplied for a method that requires them: this is a genuine
+            # unauthenticated-access attempt, so it counts against the per-IP rate limit.
+            _enforce_auth_rate_limit(client_ip)
+            logger.warning(
+                "Request rejected: missing CML credentials for method '%s' (anonymous discovery disabled)",
+                context.method,
+            )
+            raise McpError(
+                ErrorData(
+                    message="Unauthorized: CML credentials are required. Provide X-CML-Server-URL and" " X-Authorization headers.",
+                    code=-31002,
+                )
+            )
 
         if not cml_url:
             if settings.cml_url:
@@ -273,11 +488,23 @@ class CustomHttpRequestMiddleware(Middleware):
             # to the statically configured CML_URL: a request that supplies its own
             # X-CML-Server-URL must authenticate, so the configured credentials can never be
             # forwarded to (and harvested by) a client-chosen server, even an allow-listed one.
-            if settings.cml_mcp_allow_unauthenticated and not client_provided_url and settings.cml_username and settings.cml_password:
+            if (
+                settings.cml_mcp_allow_unauthenticated
+                and not client_provided_url
+                and ((settings.cml_username and settings.cml_password) or settings.cml_jwt)
+            ):
                 logger.debug("Using default CML credentials from settings (unauthenticated mode enabled)")
-                username = settings.cml_username
-                password = settings.cml_password
+                if settings.cml_jwt:
+                    username = None
+                    password = None
+                    jwt = settings.cml_jwt
+                else:
+                    username = settings.cml_username
+                    password = settings.cml_password
+                    jwt = None
             else:
+                # Missing/invalid credential format is a failed auth attempt: count it.
+                _enforce_auth_rate_limit(client_ip)
                 logger.warning("Request rejected: missing or invalid X-Authorization header")
                 raise McpError(
                     ErrorData(
@@ -287,91 +514,90 @@ class CustomHttpRequestMiddleware(Middleware):
                 )
         else:
             parts = auth_header.split(None, 1)
-            if len(parts) != 2 or parts[0].lower() != "basic":
+            scheme = parts[0].lower() if parts else ""
+            if len(parts) != 2 or scheme not in ("basic", "bearer"):
+                _enforce_auth_rate_limit(client_ip)
                 logger.warning("Request rejected: malformed X-Authorization header")
                 raise McpError(
                     ErrorData(
-                        message="Invalid X-Authorization header format. Expected 'Basic <credentials>'",
+                        message="Invalid X-Authorization header format. Expected 'Basic <credentials>' or 'Bearer <token>'",
                         code=-31001,
                     )
                 )
-            try:
-                decoded = base64.b64decode(parts[1]).decode("utf-8")
-                username, password = decoded.split(":", 1)
-            except Exception:
-                logger.warning("Request rejected: failed to decode X-Authorization credentials")
-                raise McpError(
-                    ErrorData(
-                        message="Failed to decode Basic authentication credentials",
-                        code=-31002,
-                    )
-                )
-        pyats_header = headers.get("x-pyats-authorization")
-        if pyats_header and " " in pyats_header:
-            pyats_parts = pyats_header.split(None, 1)
-            if len(pyats_parts) != 2 or pyats_parts[0].lower() != "basic":
-                logger.warning("Request rejected: malformed X-PyATS-Authorization header")
-                raise McpError(
-                    ErrorData(
-                        message="Invalid X-PyATS-Authorization header format. Expected 'Basic <credentials>'",
-                        code=-31001,
-                    )
-                )
-            try:
-                pyats_decoded = base64.b64decode(pyats_parts[1]).decode("utf-8")
-                pyats_username, pyats_password = pyats_decoded.split(":", 1)
-                _pyats_username.set(pyats_username)
-                _pyats_password.set(pyats_password)
-            except Exception:
-                logger.warning("Request rejected: failed to decode X-PyATS-Authorization credentials")
-                raise McpError(
-                    ErrorData(
-                        message="Failed to decode Basic authentication credentials for PyATS",
-                        code=-31002,
-                    )
-                )
-            pyats_enable_header = headers.get("x-pyats-enable")
-            if pyats_enable_header and " " in pyats_enable_header:
-                pyats_enable_parts = pyats_enable_header.split(None, 1)
-                if len(pyats_enable_parts) != 2 or pyats_enable_parts[0].lower() != "basic":
-                    logger.warning("Request rejected: malformed X-PyATS-Enable header")
+            if scheme == "bearer":
+                # Long-lived CML API token auth: the token is used directly as the bearer
+                # credential, no username/password login round trip is needed.
+                jwt = parts[1].strip()
+                username = None
+                password = None
+                if not jwt:
+                    _enforce_auth_rate_limit(client_ip)
+                    logger.warning("Request rejected: empty Bearer token in X-Authorization header")
                     raise McpError(
                         ErrorData(
-                            message="Invalid X-PyATS-Enable header format. Expected 'Basic <credentials>'",
+                            message="Invalid X-Authorization header: Bearer token must not be empty",
                             code=-31001,
                         )
                     )
+            else:
                 try:
-                    pyats_enable_decoded = base64.b64decode(pyats_enable_parts[1]).decode("utf-8")
-                    pyats_enable_password = pyats_enable_decoded
-                    _pyats_auth_pass.set(pyats_enable_password)
+                    decoded = base64.b64decode(parts[1]).decode("utf-8")
+                    username, password = decoded.split(":", 1)
                 except Exception:
-                    logger.warning("Request rejected: failed to decode X-PyATS-Enable credentials")
+                    _enforce_auth_rate_limit(client_ip)
+                    logger.warning("Request rejected: failed to decode X-Authorization credentials")
                     raise McpError(
                         ErrorData(
-                            message="Failed to decode Basic authentication credentials for PyATS Enable",
+                            message="Failed to decode Basic authentication credentials",
                             code=-31002,
                         )
                     )
-
+                jwt = None
         # Look for the user's client in the cache.
-        # Hash the password so it never appears in log output or dict keys.
-        pwd_hash = hashlib.sha256(password.encode()).hexdigest()
-        client_cache_key = f"{username}:{pwd_hash}:{cml_url}:{verify_ssl}"
-        request_client = await cml_client_cache.get(client_cache_key)
+        # Hash the secret (password or token) so it never appears in log output or dict keys.
+        cache_key_suffix = f"{cml_url}:{verify_ssl}"
+        if jwt:
+            client_cache_key = token_cache_key(jwt, cache_key_suffix)
+        else:
+            pwd_hash = hashlib.sha256(password.encode()).hexdigest()
+            client_cache_key = f"userpass:{username}:{pwd_hash}:{cache_key_suffix}"
+        # Redacted identifier for logs: never emit the raw username/token or cache key, only a
+        # stable hash so operators can correlate log lines without exposing credentials. Same
+        # hashing the cache uses for its own log lines, so identifiers line up across modules.
+        log_identifier = _redact_key(client_cache_key)
+        dependencies.set_request_user_hash(log_identifier)
+        request_client = await dependencies.cml_client_cache.get(client_cache_key)
         if not request_client:
+            # A cache miss means this request is a genuine new authentication attempt (about to
+            # call CML's login endpoint) -- charge it against the per-IP and per-username
+            # rate limits. Reusing an already-authenticated cached session (the common case for
+            # ongoing tool calls) does NOT consume this budget, so normal usage after the first
+            # request in a session is never throttled by these limiters.
+            _enforce_auth_rate_limit(client_ip, username=username, user_log_id=log_identifier)
             # Create a new client for this request.
-            request_client = CMLClient(cml_url, username, password, transport="http", verify_ssl=verify_ssl)
+            request_client = CMLClient(
+                cml_url,
+                username,
+                password,
+                jwt=jwt,
+                transport="http",
+                verify_ssl=verify_ssl,
+            )
             try:
                 await request_client.login()
             except Exception as e:
-                logger.warning("Authentication failed: %s", e)
+                logger.warning("Authentication failed for %s: %s", log_identifier, e)
                 raise McpError(ErrorData(message=f"Unauthorized: {str(e)}", code=-31002))
 
-            await cml_client_cache.set(client_cache_key, request_client)
+            # Remember the key/suffix this client is cached under so set_cml_jwt can
+            # re-key it (rather than mutate it in place under its original key) after
+            # rotating its credentials -- see ThreadSafeCache.rekey().
+            request_client._cache_key = client_cache_key
+            request_client._cache_key_suffix = cache_key_suffix
+            await dependencies.cml_client_cache.set(client_cache_key, request_client)
 
         # Store the client in context variable for this request
-        _request_client.set(request_client)
+        dependencies.request_client.set(request_client)
         try:
             result = await call_next(context)
             logger.debug("Request to %s completed successfully", cml_url)
@@ -390,26 +616,30 @@ class CustomHttpRequestMiddleware(Middleware):
             if request_client.needs_reauth:
                 logger.debug(
                     "Evicting stale cache entry for %s after re-auth failure",
-                    client_cache_key,
+                    log_identifier,
                 )
-                await cml_client_cache.invalidate(client_cache_key)
+                await dependencies.cml_client_cache.invalidate(client_cache_key)
             raise
         finally:
-            # Clear the context var so it doesn't leak into any subsequent work
+            # Clear the context vars so they don't leak into any subsequent work
             # on the same task.  Do NOT close the client here — it lives in the cache.
-            _request_client.set(None)
+            dependencies.request_client.set(None)
+            dependencies.set_request_user_hash("-")
 
     async def on_list_tools(self, context: MiddlewareContext, call_next) -> Sequence[Tool]:
-        # Import here to avoid circular dependency
-        from cml_mcp.tools.dependencies import get_cml_client_dep
-
         result = await call_next(context)
 
         # If no client available (unauthenticated discovery), return all tools
-        # so that skills registries can enumerate available capabilities.
+        # so that skills registries can enumerate available capabilities -- unless the ACL
+        # file failed to load, in which case the operator's intent was to fail closed and deny
+        # everything, and that must also apply to anonymous capability enumeration, not just
+        # authenticated tool calls.
         try:
-            client = get_cml_client_dep()
+            client = dependencies.get_cml_client_dep()
         except RuntimeError:
+            if acl_load_failed:
+                logger.warning("ACL file failed to load; denying anonymous tools/list (failing closed)")
+                return []
             logger.debug("No CML client available during tools/list; returning all tools without ACL filtering")
             return result
 
@@ -417,15 +647,67 @@ class CustomHttpRequestMiddleware(Middleware):
 
         return filtered_tools
 
+    # Argument keys, in priority order, whose value is logged as the "resource" in the audit
+    # log line below. These are the common id-shaped kwargs used across tool modules (lab id,
+    # node id, link id, user/group id, etc.) -- see the "Flat primitive arguments" convention in
+    # AGENTS.md. Deliberately excludes anything that looks like a credential.
+    # Child-resource id kwargs that must win over the ambient lab_id when a tool takes both
+    # (e.g. wipe_cml_node(lab_id, node_id)); every other tool has a single *_id arg that the
+    # generic fallback below already picks up, so only the disambiguating keys are listed here.
+    _AUDIT_RESOURCE_ID_KEYS = (
+        "node_id",
+        "link_id",
+        "annotation_id",
+    )
+
+    @staticmethod
+    def _extract_resource_id(arguments: dict | None) -> str:
+        """Best-effort extraction of a resource identifier from tool call arguments, for audit logging."""
+        if not arguments:
+            return "-"
+        for key in CustomHttpRequestMiddleware._AUDIT_RESOURCE_ID_KEYS:
+            value = arguments.get(key)
+            if value:
+                return str(value)
+        for key, value in arguments.items():
+            if key.endswith("_id") and value:
+                return str(value)
+        return "-"
+
     async def on_call_tool(self, context: MiddlewareContext, call_next) -> Any:
-        # Import here to avoid circular dependency
-        from cml_mcp.tools.dependencies import get_cml_client_dep
+        tool_name = context.message.name
+        arguments = getattr(context.message, "arguments", None)
+        resource_id = CustomHttpRequestMiddleware._extract_resource_id(arguments)
+        request_id = dependencies.get_request_id()
+
+        def audit(outcome: str, **extra: Any) -> None:
+            # Structured, single-line audit log per tool invocation. Deliberately logs only the
+            # redacted user hash (never username/password), the tool name, a best-effort
+            # resource id, and the outcome -- no request bodies or credentials.
+            extra_str = " " + " ".join(f"{k}={v}" for k, v in extra.items()) if extra else ""
+            logger.info(
+                "AUDIT request_id=%s user=%s tool=%s resource=%s outcome=%s%s",
+                request_id,
+                dependencies.get_request_user_hash(),
+                tool_name,
+                resource_id,
+                outcome,
+                extra_str,
+            )
 
         try:
-            client = get_cml_client_dep()
+            client = dependencies.get_cml_client_dep()
         except RuntimeError:
+            audit("denied", reason="unauthenticated")
             raise ToolError("CML credentials required. Provide X-CML-Server-URL and X-Authorization headers to call tools.")
-        if not await CustomHttpRequestMiddleware.check_tool_enabled(context.message.name, client):
-            raise ToolError(f"Tool '{context.message.name}' is disabled by server configuration")
+        if not await CustomHttpRequestMiddleware.check_tool_enabled(tool_name, client):
+            audit("denied", reason="acl")
+            raise ToolError(f"Tool '{tool_name}' is disabled by server configuration")
 
-        return await call_next(context)
+        try:
+            result = await call_next(context)
+        except Exception:
+            audit("failure")
+            raise
+        audit("success")
+        return result

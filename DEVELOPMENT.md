@@ -11,7 +11,7 @@ This guide covers how to set up a development environment, common workflows, and
 - [Daily Workflow](#daily-workflow)
 - [Adding a New Tool](#adding-a-new-tool)
 - [Recording Mock Responses](#recording-mock-responses)
-- [Bumping `virl2_client` / Regenerating CML Schemas](#bumping-virl2_client--regenerating-cml-schemas)
+- [Bumping CML Schemas](#bumping-cml-schemas)
 - [Debugging and Inspecting the Server](#debugging-and-inspecting-the-server)
 - [Testing](#testing)
 - [Code Style](#code-style)
@@ -25,7 +25,7 @@ This guide covers how to set up a development environment, common workflows, and
 - [uv](https://docs.astral.sh/uv/) - Python package/project manager
 - [just](https://github.com/casey/just) - Command runner (strongly recommended; every workflow in this guide uses it)
 - [direnv](https://direnv.net/) - Environment variable manager (optional)
-- A reachable CML 2.9+ server for live testing (optional; mock tests cover the basics)
+- A reachable CML 2.11 server for live testing (optional; mock tests cover the basics)
 
 ## Quick Start
 
@@ -59,13 +59,19 @@ This guide covers how to set up a development environment, common workflows, and
     CML_PASSWORD=your_password
     CML_VERIFY_SSL=false
     DEBUG=true
-    # Optional, for CLI command (PyATS) tools
-    PYATS_USERNAME=device_username
-    PYATS_PASSWORD=device_password
-    PYATS_AUTH_PASS=enable_password
     ```
 
-5. Verify your setup:
+5. (Recommended) Install git pre-commit hooks:
+
+    ```sh
+    uv run pre-commit install
+    ```
+
+    Run this from the `cml-mcp` repository root (the directory that contains
+    `.pre-commit-config.yaml`). Hooks run black, isort, flake8, and a few
+    file hygiene checks on each commit — the same linters as `just check`.
+
+6. Verify your setup:
 
     ```sh
     just check    # lint
@@ -86,6 +92,7 @@ The project uses [`just`](https://github.com/casey/just) as its task runner. **A
 | `just test [args]` | Run the offline test suite (mocks). Pass pytest args, e.g. `just test "-x -k packet"` |
 | `just test-live [args]` | Run tests against a real CML server (`USE_MOCKS=false`) |
 | `just check` | `black --check`, `isort --check-only`, `flake8` over `src/` and `tests/` |
+| `just pre-commit` | Run all pre-commit hooks on every file (`pre-commit run --all-files`) |
 | `just build` | Build wheel + multi-arch Docker image |
 | `just clean` / `just fresh` | Remove caches/venv (prompts for confirmation) |
 
@@ -160,7 +167,7 @@ This is the most common contribution. The full conventions live in [AGENTS.md](A
     > **Why dicts and not Pydantic models for the request payload?** The auto-generated CML schemas are strict and frequently reject `None` even for fields that nominally default to `None`. Building a dict and letting the CML server validate avoids brittle re-typing in our tool layer. The exception is `create_full_lab_topology`, which accepts `Topology | dict | str` because the structure is genuinely deeply nested.
 
 4. **Annotate destructive/read-only behavior** in the `@mcp.tool(annotations={...})` block. Use `readOnlyHint`, `destructiveHint`, `idempotentHint`, `title`.
-5. **Destructive tools** (`wipe_*`, `delete_*`) must call `await elicit_confirmation(ctx, "...")` and include a `CRITICAL:` line in the docstring. **Note:** elicitation is currently disabled in [tools/dependencies.py](src/cml_mcp/tools/dependencies.py) (the helper short-circuits to `True`) because some MCP clients duplicate or mishandle `ctx.elicit()`. Until it's re-enabled, the `CRITICAL:` docstring line is the only thing pushing the LLM to confirm — so write it clearly. Keep the `await elicit_confirmation(...)` call in place so re-enabling is a one-line change.
+5. **Destructive tools** (`wipe_*`, `delete_*`) must accept an explicit `confirm: bool = False` parameter and include a `CRITICAL:` line in the docstring. See [Two-stage confirm for destructive tools](#two-stage-confirm-for-destructive-tools) below for the pattern. The `confirm` parameter plus the `CRITICAL:` docstring line are what push the LLM to confirm — so write the docstring clearly.
 6. **Admin-only tools** must gate with `if not await client.is_admin(): raise ValueError(...)`.
 7. **Register the tool** — if you added a new module, add a `register_tools(mcp)` call in `src/cml_mcp/server.py`. Tools inside an existing module are picked up automatically.
 8. **Add a mock fixture** if the tool calls a new CML REST endpoint — see [Recording Mock Responses](#recording-mock-responses).
@@ -191,6 +198,29 @@ async def get_nodes_for_cml_lab(lid: UUID4Type) -> list[Node]:
 
 Add a brief one-line comment at the return site pointing back here (`# See DEVELOPMENT.md "Object-typed return values" ...`) so future contributors don't "clean up" the apparent redundancy.
 
+### Two-stage confirm for destructive tools
+
+Every `wipe_*`/`delete_*` tool implements confirmation itself via an explicit `confirm: bool = False` parameter:
+
+```python
+async def wipe_cml_lab(lab_id: UUID4Type, confirm: bool = False) -> bool:
+    client = get_cml_client_dep()
+    if not confirm:
+        raise ToolError(
+            f"This will irreversibly wipe lab {lab_id} ... "
+            "Ask the user to confirm, then re-call this tool with confirm=true to proceed."
+        )
+    await wipe_lab(lab_id, client)
+    return True
+```
+
+**How it works:** the first call (no `confirm`, or `confirm=false`) always raises a `ToolError` describing the irreversible effect and instructing the caller to re-invoke with `confirm=true`. A tool-calling LLM sees this error text and is expected to relay it to the user, get an explicit "yes", and only then re-call the tool with `confirm=true`. This is a two-stage commit: **stage 1** (preview/refuse) never touches the CML API; **stage 2** (`confirm=true`) performs the action.
+
+This is deliberately redundant with the `CRITICAL:` docstring instruction — the docstring is a soft nudge that some models ignore, while `confirm` is a hard, schema-visible gate that forces a second tool call no matter how the LLM behaves. When adding a new destructive tool, always add both.
+
+> **Why not `ctx.elicit()`?** MCP's native elicitation prompt was intentionally dropped: several clients (e.g. Co-Pilot) duplicate or mishandle `ctx.elicit()`, and it only works on elicitation-capable clients, whereas the `confirm` gate is a schema-level control that works on every client. The `confirm` two-stage gate is the single confirmation mechanism.
+
+
 ## Recording Mock Responses
 
 Mock tests live under `tests/mocks/`, one JSON file per tool. To record a new one against a live CML server:
@@ -202,9 +232,9 @@ Mock tests live under `tests/mocks/`, one JSON file per tool. To record a new on
 
 See [tests/MOCK_FRAMEWORK.md](tests/MOCK_FRAMEWORK.md) for the full mock dispatch pattern.
 
-## Bumping `virl2_client` / Regenerating CML Schemas
+## Bumping CML Schemas
 
-When you upgrade `virl2_client` (or otherwise refresh `src/cml_mcp/cml/`), some Pydantic models may gain, lose, or change fields. Each flattened tool that mirrors one of those models needs a corresponding update.
+When CML schemas change — regenerated `src/cml_mcp/cml/` on upstream, or updated `simple_webserver` on the internal fork — some Pydantic models may gain, lose, or change fields. Each flattened tool that mirrors one of those models needs a corresponding update.
 
 [AGENTS.md](AGENTS.md#sample-prompt-for-agents-auditing-a-schema-bump) contains a step-by-step prompt you can paste into your agent of choice (or follow manually). The high-level checklist:
 
@@ -259,7 +289,7 @@ This is exactly what `tests/test_schema_drift.py` does and is the fastest way to
 Tests live in `tests/test_cml_mcp.py` and run in two modes via the `USE_MOCKS` env var (default `true`).
 
 - **Mock mode** (`just test`) — Fast, no CML server, uses pre-recorded JSON in `tests/mocks/`. CI runs this.
-- **Live mode** (`just test-live`) — Hits a real CML 2.9+ server using credentials from `.env`. Creates and deletes real labs/nodes/users/groups; safe but slower.
+- **Live mode** (`just test-live`) — Hits a real CML 2.11 server using credentials from `.env`. Creates and deletes real labs/nodes/users/groups; safe but slower.
 
 Tests marked `@pytest.mark.live_only` are skipped in mock mode, and `@pytest.mark.mock_only` tests are skipped in live mode (see fixtures in `tests/conftest.py`).
 
@@ -279,7 +309,7 @@ See [tests/README.md](tests/README.md) and [tests/QUICK_START.md](tests/QUICK_ST
 - **isort** — import sorting
 - **flake8** — linting
 
-All three are configured in [pyproject.toml](pyproject.toml). Auto-generated schemas under `src/cml_mcp/cml/` are excluded.
+All three are configured in [pyproject.toml](pyproject.toml) (flake8 rules in [.flake8](.flake8)). Auto-generated schemas under `src/cml_mcp/cml/` are excluded.
 
 `just check` runs all three in `--check` mode. To auto-fix formatting:
 
@@ -287,6 +317,19 @@ All three are configured in [pyproject.toml](pyproject.toml). Auto-generated sch
 uv run black src/ tests/
 uv run isort src/ tests/
 ```
+
+### Pre-commit hooks
+
+[`.pre-commit-config.yaml`](.pre-commit-config.yaml) mirrors `just check` (black, isort, flake8) plus trailing-whitespace, end-of-file-fixer, and check-yaml. Install once per clone:
+
+```sh
+just dev-install
+uv run pre-commit install    # from the cml-mcp repo root
+```
+
+On each `git commit`, staged files are linted and auto-fixed where possible (black/isort). Run the full suite manually with `just pre-commit` or `uv run pre-commit run --all-files`.
+
+**Submodule vs monorepo:** `packaging/mcp_server` is a git submodule inside the CML `simple` monorepo. The monorepo's root [`.pre-commit-config.yaml`](https://github.com/CiscoModelingLabs/simple/blob/master/.pre-commit-config.yaml) uses ruff and other hooks for the wider tree — it does **not** replace this config. Install hooks from **this** directory when working on `cml-mcp`; root `simple` hooks and submodule hooks are independent.
 
 ## Project Structure
 
@@ -332,8 +375,24 @@ cml-mcp/
 
 - Each `tools/*.py` module exports a `register_tools(mcp)` function called from `server.py`.
 - Tools obtain the CML client through `get_cml_client_dep()` (never instantiate `CMLClient` directly inside a tool).
-- The session cache in `cache.py` keeps authenticated `CMLClient` instances warm across HTTP requests, keyed by `username:pwd_hash:cml_url:verify_ssl` with an idle TTL (default 1 hour).
+- The session cache in `cache.py` keeps authenticated `CMLClient` instances warm across HTTP requests, keyed by `username:pwd_hash:cml_url:verify_ssl` with an idle TTL (default 1 hour, `CML_SESSION_TTL`).
+
+  **Credential lifetime caveat:** each cached `CMLClient` retains the user's plaintext password (needed to re-authenticate after the CML token expires) for as long as the entry survives -- i.e. up to `CML_SESSION_TTL` seconds after the *last* request that used it, not from when it was created. Operators who need short-lived credential exposure should set `CML_SESSION_TTL` accordingly. A more thorough fix (zero out the password once the CMLClient is evicted, and re-prompt via a fresh `X-Authorization` header if the client authenticates again before eviction) is tracked as a follow-up; it is more invasive than fits this pass because it changes the re-auth flow's error semantics (a request arriving after zeroing would need to fail with a clear "session expired, re-authenticate" error rather than silently reusing a blanked password).
 - Middleware in `middleware.py` enforces optional ACLs in HTTP mode (see `acl.yaml.example`). It also validates client-supplied CML URLs against `CML_ALLOWED_URLS` / `CML_URL_PATTERN` by parsing them with Pydantic's `AnyHttpUrl` and comparing only the scheme/host/port (userinfo, path, and query are ignored so they cannot spoof an allowed host). The `X-CML-Verify-SSL` header is honored only for requests that supply their own `X-CML-Server-URL`; requests using the default `CML_URL` always use `CML_VERIFY_SSL`.
+
+### Audit logging
+
+Every HTTP request gets a short correlation id (`tools/dependencies.py::new_request_id()`, generated at the very top of `CustomHttpRequestMiddleware.on_request`) stored in a `contextvars.ContextVar`. A `logging.Filter` (`RequestIdLogFilter`) attached to the `cml-mcp` logger's handler in `server.py` injects that id into every log record as `%(request_id)s`, so any log line emitted while handling a request -- from any module -- can be correlated without threading the id through every function signature. Outside of an HTTP request (stdio mode, or before authentication runs) the field defaults to `-`.
+
+`CustomHttpRequestMiddleware.on_call_tool` emits one structured `AUDIT` line per tool invocation at INFO level:
+
+```
+AUDIT request_id=<id> user=<hash> tool=<tool_name> resource=<id-or--> outcome=<success|failure|denied> [reason=<...>]
+```
+
+- `user` is the same redacted SHA-256-derived identifier used elsewhere (see log-redaction below) -- never the raw username.
+- `resource` is a best-effort id pulled from the tool's arguments (`_extract_resource_id`, checking common id-shaped kwargs like `lid`/`node_id`/`user_id` before falling back to any `*_id` key); it is `-` when nothing matches.
+- `outcome` is `denied` (with a `reason` of `unauthenticated` or `acl`) if the call never reached the tool body, `failure` if the tool raised, or `success` otherwise. The line intentionally never includes the full argument dict, since that could contain payload data or, in principle, sensitive fields.
 
 ### Why this layout
 
@@ -372,3 +431,18 @@ just publish
 ```
 
 **Bump the version in [pyproject.toml](pyproject.toml) and tag the release** before publishing. Update the relevant entries in `README.md` (tool count, what's new) and `AGENTS.md` (tool table) so the published artifacts match.
+
+### Refreshing pinned base image digests
+
+Both `FROM` lines in `Dockerfile` are pinned by digest (not just tag) so a compromised or
+re-tagged upstream image can't silently change what ships in a release. When bumping the Python
+version or picking up upstream fixes, refresh both digests together:
+
+```sh
+docker pull ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+docker pull python:3.13-slim-bookworm
+# Each `docker pull` prints "Digest: sha256:...". Paste that into the corresponding
+# FROM line as `image:tag@sha256:...`.
+```
+
+After bumping, rebuild and re-run `just test` against the new image before publishing.

@@ -28,19 +28,21 @@ Lab management tools for CML MCP server.
 
 import asyncio
 import logging
+import re
 from typing import Annotated
 
 import httpx
 import yaml
-from fastmcp import Context
 from fastmcp.exceptions import ToolError
 
-from cml_mcp.cml.simple_webserver.schemas.common import UUID4_REG, UserName, UUID4Type
+from cml_mcp.border_style import normalize_topology_border_styles, wire_topology_border_styles
+from cml_mcp.cml.simple_common.schemas.types import UUID4_REG
+from cml_mcp.cml.simple_webserver.schemas.common import UserName, UUID4Type
 from cml_mcp.cml.simple_webserver.schemas.labs import Lab, LabAssociations, LabNotes, LabRequest, LabTitle
 from cml_mcp.cml.simple_webserver.schemas.topologies import Topology
-from cml_mcp.border_style import normalize_topology_border_styles, wire_topology_border_styles
 from cml_mcp.cml_client import CMLClient
-from cml_mcp.tools.dependencies import elicit_confirmation, get_cml_client_dep
+from cml_mcp.tools.dependencies import get_cml_client_dep
+from cml_mcp.tools.errors import sanitize_http_error
 from cml_mcp.tools.model_helpers import build_payload, field_from, lenient_construct, parse_json_arg
 
 logger = logging.getLogger("cml-mcp.tools.labs")
@@ -66,7 +68,7 @@ def _validate_lab_associations(items: list[dict] | None, kind: str) -> None:
                 f"(missing={sorted(missing)}, unexpected={sorted(extra)})"
             )
         ent_id = entry["id"]
-        if not isinstance(ent_id, str) or not UUID4_REG.match(ent_id):
+        if not isinstance(ent_id, str) or not re.fullmatch(UUID4_REG, ent_id):
             raise ToolError(f"{prefix}: 'id' must be a UUID4 string, got {ent_id!r}")
         perms = entry["permissions"]
         if not isinstance(perms, list) or not perms:
@@ -167,7 +169,7 @@ def register_tools(mcp):  # noqa: C901
                     ulabs.append(Lab(**lab_details).model_dump(exclude_unset=True))
             return ulabs
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting CML labs")
             raise ToolError(e)
@@ -210,7 +212,7 @@ def register_tools(mcp):  # noqa: C901
             resp = await client.post("/labs", data=payload)
             return UUID4Type(resp["id"])
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error creating empty lab topology")
             raise ToolError(e)
@@ -254,7 +256,7 @@ def register_tools(mcp):  # noqa: C901
             await client.patch(f"/labs/{lab_id}", data=payload)
             return True
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error modifying lab %s", lab_id)
             raise ToolError(e)
@@ -298,7 +300,7 @@ def register_tools(mcp):  # noqa: C901
         except ToolError:
             raise
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error setting lab permissions for lab %s", lab_id)
             raise ToolError(e)
@@ -343,7 +345,7 @@ def register_tools(mcp):  # noqa: C901
                 topology = lenient_construct(Topology, parse_json_arg(topology))
             return await create_full_topology_from_obj(topology, client)
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error creating lab topology")
             raise ToolError(e)
@@ -376,7 +378,7 @@ def register_tools(mcp):  # noqa: C901
                     await asyncio.sleep(3)
             return True
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error starting CML lab %s", lab_id)
             raise ToolError(e)
@@ -418,7 +420,7 @@ def register_tools(mcp):  # noqa: C901
             await stop_lab(lab_id, client)
             return True
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error stopping CML lab %s", lab_id)
             raise ToolError(e)
@@ -431,12 +433,13 @@ def register_tools(mcp):  # noqa: C901
             "idempotentHint": True,
         },
     )
-    async def wipe_cml_lab(lab_id: UUID4Type, ctx: Context) -> bool:
+    async def wipe_cml_lab(lab_id: UUID4Type, confirm: bool = False) -> bool:
         """
         Wipe a CML lab by UUID -- erases all node disk data and configurations. Lab is stopped first if needed.
 
-        CRITICAL: Destructive and irreversible. Always ask "Confirm wipe of [lab]?" and wait for the
-        user's "yes" before invoking this tool.
+        CRITICAL: Destructive and irreversible. This tool uses a two-stage confirm: call it once
+        with confirm omitted/false to preview, ask the user "Confirm wipe of [lab]?", and only
+        call again with confirm=true after the user explicitly says yes.
 
         Examples:
         - "Wipe the OSPF lab"
@@ -444,13 +447,16 @@ def register_tools(mcp):  # noqa: C901
         - "Erase all node data in my CML lab"
         """
         client = get_cml_client_dep()
+        if not confirm:
+            raise ToolError(
+                f"This will irreversibly wipe lab {lab_id} (erase all node disk data and configurations)."
+                " Ask the user to confirm, then re-call this tool with confirm=true to proceed."
+            )
         try:
-            if not await elicit_confirmation(ctx, "Are you sure you want to wipe the lab?"):
-                raise Exception("Wipe operation cancelled by user.")
             await wipe_lab(lab_id, client)
             return True
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error wiping CML lab %s", lab_id)
             raise ToolError(e)
@@ -462,12 +468,13 @@ def register_tools(mcp):  # noqa: C901
             "destructiveHint": True,
         },
     )
-    async def delete_cml_lab(lab_id: UUID4Type, ctx: Context) -> bool:
+    async def delete_cml_lab(lab_id: UUID4Type, confirm: bool = False) -> bool:
         """
         Delete a CML lab by UUID. Auto-stops and wipes the lab first.
 
-        CRITICAL: Destructive and irreversible. Always ask "Confirm deletion of [lab]?" and wait for the
-        user's "yes" before invoking this tool.
+        CRITICAL: Destructive and irreversible. This tool uses a two-stage confirm: call it once
+        with confirm omitted/false to preview, ask the user "Confirm deletion of [lab]?", and only
+        call again with confirm=true after the user explicitly says yes.
 
         Examples:
         - "Delete lab abc123"
@@ -475,15 +482,18 @@ def register_tools(mcp):  # noqa: C901
         - "Get rid of the test lab"
         """
         client = get_cml_client_dep()
+        if not confirm:
+            raise ToolError(
+                f"This will irreversibly delete lab {lab_id} (stop, wipe, and remove it)."
+                " Ask the user to confirm, then re-call this tool with confirm=true to proceed."
+            )
         try:
-            if not await elicit_confirmation(ctx, "Are you sure you want to delete the lab?"):
-                raise Exception("Delete operation cancelled by user.")
             await stop_lab(lab_id, client)  # Ensure the lab is stopped before deletion
             await wipe_lab(lab_id, client)  # Ensure the lab is wiped before deletion
             await client.delete(f"/labs/{lab_id}")
             return True
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error deleting CML lab %s", lab_id)
             raise ToolError(e)
@@ -509,7 +519,7 @@ def register_tools(mcp):  # noqa: C901
                     return Lab(**lab).model_dump(exclude_unset=True)
             raise ValueError(f"Lab with title '{title}' not found.")
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting CML lab by title %s", title)
             raise ToolError(e)
@@ -531,7 +541,7 @@ def register_tools(mcp):  # noqa: C901
         try:
             return await download_lab_file(lab_id, client)
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error downloading lab topology for lab %s", lab_id)
             raise ToolError(e)
@@ -561,7 +571,7 @@ def register_tools(mcp):  # noqa: C901
             topology = Topology(**yaml_data)
             return await create_full_topology_from_obj(topology, client)
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error cloning CML lab %s", lab_id)
             raise ToolError(e)

@@ -25,8 +25,8 @@ USE_MOCKS=false pytest -m live_only tests/           # only live-only
 
 ## Test Results Summary
 
-- **Mock mode**: 14 passed, 11 skipped (live_only tests)
-- **Live mode**: 25 tests run against a real CML 2.9+ server
+- **Mock mode**: 45 collected, 29 skipped (`live_only`)
+- **Live mode**: 65 collected against a real CML 2.11 server (9 `mock_only` skipped)
 
 ## Environment Variables
 
@@ -47,7 +47,12 @@ USE_MOCKS=false pytest -m live_only tests/           # only live-only
 ## Files
 
 - `tests/conftest.py` - Mock framework + fixtures
-- `tests/test_cml_mcp.py` - Main test suite
+- `tests/test_cml_mcp.py` - Main mock/live suite
+- `tests/test_cli.py` - Native `/cli` POST shape
+- `tests/test_middleware.py` - HTTP URL allow-list / pattern checks
+- `tests/test_cache.py` - Session cache
+- `tests/test_border_style.py` - Topology border_style wire
+- `tests/test_cml_mcp_compat.py` - Live 2.11 tool coverage
 - `tests/test_schema_drift.py` - Catches CML schema drift in flattened tools
 - `tests/mocks/*.json` - Mock API responses
 - `tests/README.md` - Detailed documentation
