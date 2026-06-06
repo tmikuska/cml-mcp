@@ -15,8 +15,8 @@ from pydantic import (
     field_serializer,
 )
 
-from simple_common.constants import DEFAULT_LOGIN_TIMEOUT
 from simple_common.schemas import (
+    DEFAULT_LOGIN_TIMEOUT,
     DefaultPermissions,
     InterfaceState,
     LabState,

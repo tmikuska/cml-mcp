@@ -28,6 +28,7 @@ Lab management tools for CML MCP server.
 
 import asyncio
 import logging
+import re
 from typing import Annotated
 
 import httpx
@@ -35,7 +36,8 @@ import yaml
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 
-from cml_mcp.cml.simple_webserver.schemas.common import UUID4_REG, UserName, UUID4Type
+from cml_mcp.cml.simple_common.schemas.types import UUID4_REG
+from cml_mcp.cml.simple_webserver.schemas.common import UserName, UUID4Type
 from cml_mcp.cml.simple_webserver.schemas.labs import Lab, LabAssociations, LabNotes, LabRequest, LabTitle
 from cml_mcp.cml.simple_webserver.schemas.topologies import Topology
 from cml_mcp.cml_client import CMLClient
@@ -65,7 +67,7 @@ def _validate_lab_associations(items: list[dict] | None, kind: str) -> None:
                 f"(missing={sorted(missing)}, unexpected={sorted(extra)})"
             )
         ent_id = entry["id"]
-        if not isinstance(ent_id, str) or not UUID4_REG.match(ent_id):
+        if not isinstance(ent_id, str) or not re.fullmatch(UUID4_REG, ent_id):
             raise ToolError(f"{prefix}: 'id' must be a UUID4 string, got {ent_id!r}")
         perms = entry["permissions"]
         if not isinstance(perms, list) or not perms:

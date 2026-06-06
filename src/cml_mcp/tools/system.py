@@ -32,7 +32,8 @@ from typing import Any
 import httpx
 from fastmcp.exceptions import ToolError
 
-from cml_mcp.cml.simple_webserver.schemas.system import SystemHealth, SystemInformation, SystemStats
+from cml_mcp.cml.simple_common.schemas.system_health import SystemHealth
+from cml_mcp.cml.simple_webserver.schemas.system import SystemInformation, SystemStats
 from cml_mcp.tools.dependencies import get_cml_client_dep
 
 logger = logging.getLogger("cml-mcp.tools.system")
