@@ -24,31 +24,22 @@ def test_border_style_from_api_legacy_wire(wire, expected):
 
 
 @pytest.mark.parametrize(
-    ("alias", "expected"),
+    ("wire", "expected"),
     [
         ("solid", ""),
         ("dotted", "2,2"),
         ("dashed", "4,2"),
-    ],
-)
-def test_border_style_for_api_canonical_aliases(alias, expected):
-    assert border_style_for_api(alias) == expected
-
-
-@pytest.mark.parametrize(
-    ("wire", "expected"),
-    [
         ("", ""),
         ("2,2", "2,2"),
         ("4,2", "4,2"),
     ],
 )
-def test_border_style_for_api_legacy_passthrough(wire, expected):
+def test_border_style_for_api_legacy_wire(wire, expected):
     assert border_style_for_api(wire) == expected
 
 
 def test_border_style_for_api_rejects_unknown():
-    with pytest.raises(KeyError):
+    with pytest.raises(ValueError):
         border_style_for_api("invalid")
 
 
@@ -56,7 +47,7 @@ def test_border_style_from_api_accepts_canonical():
     assert border_style_from_api("dashed") == "dashed"
 
 
-def test_wire_topology_border_styles():
+def test_wire_topology_border_styles_emits_legacy():
     payload = {
         "annotations": [{"type": "line", "border_style": "dashed"}],
         "smart_annotations": [{"tag": "core", "border_style": "dotted"}],
@@ -76,7 +67,7 @@ def test_normalize_topology_border_styles():
     assert payload["smart_annotations"][0]["border_style"] == "solid"
 
 
-def test_topology_border_style_write_read_roundtrip():
+def test_topology_border_style_roundtrip_stays_canonical():
     legacy = {
         "annotations": [{"type": "line", "border_style": "4,2"}],
         "smart_annotations": [{"tag": "core", "border_style": ""}],
@@ -90,9 +81,8 @@ def test_topology_border_style_write_read_roundtrip():
 
 
 @pytest.mark.asyncio
-async def test_create_full_topology_posts_legacy_wire_from_topology_model():
-    from cml_mcp.cml.simple_webserver.schemas.topologies import Topology
-    from cml_mcp.tools.labs import create_full_topology_from_obj
+async def test_create_full_topology_posts_canonical_wire_from_topology_model():
+    from cml_mcp.tools.labs import create_full_topology_from_obj, topology_from_mcp_input
 
     posted: dict = {}
 
@@ -103,7 +93,7 @@ async def test_create_full_topology_posts_legacy_wire_from_topology_model():
             return {"id": "00000000-0000-4000-8000-000000000001"}
 
     payload = {
-        "lab": {"version": "0.1.0", "title": "Import Test", "node_staging": None},
+        "lab": {"version": "0.1.0", "title": "Import Test"},
         "nodes": [],
         "links": [],
         "annotations": [
@@ -124,7 +114,7 @@ async def test_create_full_topology_posts_legacy_wire_from_topology_model():
         ],
         "smart_annotations": [{"tag": "core", "border_style": "dotted"}],
     }
-    topology = Topology(**payload)
+    topology = topology_from_mcp_input(payload)
     await create_full_topology_from_obj(topology, FakeClient())  # type: ignore[arg-type]
     assert posted["endpoint"] == "/import"
     assert posted["data"]["annotations"][0]["border_style"] == "4,2"

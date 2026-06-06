@@ -27,7 +27,13 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from cml_mcp.cml.simple_webserver.schemas.common import DefinitionID, LinuxInterfaceName, UUID4Type
-from cml_mcp.cml.simple_webserver.schemas.node_definitions import General
+from cml_mcp.cml.simple_webserver.schemas.node_definitions import DeviceNature
+
+
+class SimplifiedGeneral(BaseModel, extra="ignore"):
+    nature: DeviceNature = Field(...)
+    description: str | None = Field(default=None)
+    read_only: bool = Field(default=False)
 
 
 class SimplifiedInterfaces(BaseModel, extra="ignore"):
@@ -78,7 +84,7 @@ class SuperSimplifiedNodeDefinitionResponse(BaseModel, extra="ignore"):
             `asav`.
         """,
     )
-    general: General = Field(...)
+    general: SimplifiedGeneral = Field(...)
     device: SimplifiedDevice = Field(...)
     image_definitions: list[DefinitionID] = Field(default_factory=list)
 
