@@ -1,6 +1,12 @@
 ---
 # If a user is not explicitly mentioned in the file, they are denied tool use.  By default, users not explicitly
 # named in the file are allowed to call all tools.
+#
+# SECURITY NOTE: send_cli_command is annotated destructiveHint=True (it can push configuration
+# changes, reload devices, etc. via direct CLI access) even though it is not a wipe_*/delete_*
+# tool. Do not treat "not literally wipe/delete" as "safe to leave broadly enabled" — allow-list
+# it deliberately for the specific users/groups who need raw CLI access (as jsmith does below),
+# the same way you would for any other destructive tool.
 default_enabled: False
 users:
     # Admin is allowed to call all tools.
@@ -10,7 +16,8 @@ users:
         disabled_tools:
             - delete_cml_lab
             - delete_cml_node
-    # jsmith is only allowed to call send_cli_command.
+    # jsmith is only allowed to call send_cli_command. This is deliberately allow-listed rather
+    # than left enabled by default: send_cli_command is destructiveHint=True (see note above).
     jsmith:
         enabled_tools:
             - send_cli_command
