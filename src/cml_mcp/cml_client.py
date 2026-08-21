@@ -27,7 +27,6 @@ import os
 from typing import Any
 
 import httpx
-import virl2_client
 
 API_TIMEOUT = 10  # seconds
 MCP_CLIENT_IDENTIFIER = "CmlMCP"
@@ -69,14 +68,6 @@ class CMLClient(object):
 
         self.base_url = host.rstrip("/")
         self.api_base = f"{self.base_url}/api/v0"
-        self.vclient = virl2_client.ClientLibrary(
-            host,
-            username,
-            password,
-            ssl_verify=verify_ssl,
-            allow_http=True,
-            client_type=MCP_CLIENT_IDENTIFIER,
-        )
         self.client = httpx.AsyncClient(verify=verify_ssl, timeout=API_TIMEOUT)
         self.client.headers.update({"X-CML-CLIENT": MCP_CLIENT_IDENTIFIER})
 
@@ -173,14 +164,23 @@ class CMLClient(object):
             logger.exception("Error making GET request to %s", url)
             raise e
 
-    async def post(self, endpoint: str, data: dict | None = None, params: dict | None = None) -> Any | None:
+    async def post(
+        self,
+        endpoint: str,
+        data: dict | None = None,
+        params: dict | None = None,
+        timeout: float | None = None,
+    ) -> Any | None:
         """
         Make a POST request to the CML API.
         """
         await self.check_authentication()
         url = f"{self.api_base}{endpoint}"
+        request_kwargs: dict[str, Any] = {"json": data, "params": params}
+        if timeout is not None:
+            request_kwargs["timeout"] = timeout
         try:
-            resp = await self.client.post(url, json=data, params=params)
+            resp = await self.client.post(url, **request_kwargs)
             resp.raise_for_status()
             if resp.status_code == 204:  # No content
                 return None
