@@ -27,10 +27,15 @@ import os
 from typing import Any
 
 import httpx
-import virl2_client
+from packaging.version import Version
 
 API_TIMEOUT = 10  # seconds
 MCP_CLIENT_IDENTIFIER = "CmlMCP"
+
+# POST /labs/{lab_id}/nodes/{node_id}/cli was introduced in CML 2.11. Servers
+# older than this do not have the endpoint at all, so CLI execution must fall
+# back to a local Unicon connection for them.
+MIN_NATIVE_CLI_VERSION = Version("2.11")
 
 # Set up logging for this module only
 logger = logging.getLogger("cml-mcp.cml_client")
@@ -66,17 +71,10 @@ class CMLClient(object):
         self._token = None
         self.admin = None
         self.needs_reauth = False
+        self._supports_native_cli: bool | None = None
 
         self.base_url = host.rstrip("/")
         self.api_base = f"{self.base_url}/api/v0"
-        self.vclient = virl2_client.ClientLibrary(
-            host,
-            username,
-            password,
-            ssl_verify=verify_ssl,
-            allow_http=True,
-            client_type=MCP_CLIENT_IDENTIFIER,
-        )
         self.client = httpx.AsyncClient(verify=verify_ssl, timeout=API_TIMEOUT)
         self.client.headers.update({"X-CML-CLIENT": MCP_CLIENT_IDENTIFIER})
 
@@ -159,6 +157,27 @@ class CMLClient(object):
             logger.exception("Error checking admin status")
             return False
 
+    async def supports_native_cli(self) -> bool:
+        """
+        Check whether the connected CML controller exposes the native
+        POST /labs/{lab_id}/nodes/{node_id}/cli endpoint (added in CML 2.11).
+
+        The result is derived from /system_information's "version" field and
+        cached for the lifetime of this client, since the controller version
+        cannot change mid-session.
+        """
+        if self._supports_native_cli is not None:
+            return self._supports_native_cli
+
+        try:
+            info = await self.get("/system_information")
+            self._supports_native_cli = Version(info["version"]) >= MIN_NATIVE_CLI_VERSION
+        except Exception:
+            logger.exception("Could not determine CML server version; assuming native CLI API is unavailable")
+            self._supports_native_cli = False
+
+        return self._supports_native_cli
+
     async def get(self, endpoint: str, params: dict | None = None, is_binary: bool = False) -> Any:
         """
         Make a GET request to the CML API.
@@ -173,14 +192,23 @@ class CMLClient(object):
             logger.exception("Error making GET request to %s", url)
             raise e
 
-    async def post(self, endpoint: str, data: dict | None = None, params: dict | None = None) -> Any | None:
+    async def post(
+        self,
+        endpoint: str,
+        data: dict | None = None,
+        params: dict | None = None,
+        timeout: float | None = None,
+    ) -> Any | None:
         """
         Make a POST request to the CML API.
         """
         await self.check_authentication()
         url = f"{self.api_base}{endpoint}"
+        request_kwargs: dict[str, Any] = {"json": data, "params": params}
+        if timeout is not None:
+            request_kwargs["timeout"] = timeout
         try:
-            resp = await self.client.post(url, json=data, params=params)
+            resp = await self.client.post(url, **request_kwargs)
             resp.raise_for_status()
             if resp.status_code == 204:  # No content
                 return None
