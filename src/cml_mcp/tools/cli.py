@@ -26,6 +26,7 @@
 CLI command and console log tools for CML MCP server.
 """
 
+import asyncio
 import logging
 import re
 
@@ -35,6 +36,7 @@ from fastmcp.exceptions import ToolError
 from cml_mcp.cml.simple_webserver.schemas.common import UUID4Type
 from cml_mcp.cml.simple_webserver.schemas.nodes import NodeLabel
 from cml_mcp.tools.dependencies import get_cml_client_dep
+from cml_mcp.tools.pyats_cli import PYATS_AVAILABLE, pyats_send_cli_command_sync
 from cml_mcp.types import ConsoleLogOutput
 
 logger = logging.getLogger("cml-mcp.tools.cli")
@@ -49,6 +51,60 @@ async def _resolve_node_id_by_label(client, lab_id: UUID4Type, label: str) -> UU
         if node["label"] == label:
             return node["id"]
     raise ToolError(f"No node with label '{label}' was found in lab {lab_id}")
+
+
+async def _send_cli_command_native(client, lab_id: UUID4Type, label: str, commands: str, config_command: bool, console: int) -> str:
+    """
+    Send CLI commands via the native CML API (POST /labs/{lab_id}/nodes/{node_id}/cli, CML 2.11+).
+    That endpoint only accepts a single command per request, so multi-line input is split up
+    and sent one line at a time.
+    """
+    node_id = await _resolve_node_id_by_label(client, lab_id, label)
+    command_lines = [line for line in commands.splitlines() if line.strip()]
+    if not command_lines:
+        raise ToolError("No CLI command was provided")
+
+    outputs = []
+    for command in command_lines:
+        result = await client.post(
+            f"/labs/{lab_id}/nodes/{node_id}/cli",
+            data={
+                "config_command": config_command,
+                "command": command,
+                "serial_port": console,
+                "timeout": 300,
+            },
+            timeout=310,  # Slightly above the server-side max CLI timeout (300s).
+        )
+        outputs.append(result if len(command_lines) == 1 else f"Command: {command}\nOutput:\n{result}\n")
+
+    return "".join(outputs) if len(command_lines) > 1 else outputs[0]
+
+
+async def _send_cli_command_pyats(client, lab_id: UUID4Type, label: str, commands: str, config_command: bool) -> str:
+    """
+    Fallback for CML controllers older than 2.11 that lack the native /cli endpoint: load the
+    server-provided pyATS testbed and connect to the node directly over SSH.
+    """
+    if not PYATS_AVAILABLE:
+        raise ToolError(
+            "This CML server is older than 2.11 and does not support the native CLI API. "
+            "Sending CLI commands requires pyATS, which is not installed. "
+            "Install with: pip install 'cml-mcp[pyats]'"
+        )
+
+    testbed_raw = await client.get(f"/labs/{lab_id}/pyats_testbed", is_binary=True)
+    testbed_yaml = testbed_raw.decode("utf-8")
+
+    return await asyncio.to_thread(
+        pyats_send_cli_command_sync,
+        testbed_yaml,
+        client.username,
+        client.password,
+        label,
+        commands,
+        config_command,
+    )
 
 
 def register_tools(mcp):
@@ -109,11 +165,14 @@ def register_tools(mcp):
         console: int = 0,
     ) -> str:
         """
-        Send CLI commands to a running node via the CML server-side CLI API. Identify the node
-        by lab UUID and node label (NOT node UUID). Node must be in BOOTED state. Returns command
-        output text.
+        Send CLI commands to a running node. Identify the node by lab UUID and node label (NOT
+        node UUID). Node must be in BOOTED state. Returns command output text.
 
-        - Separate multiple commands with newlines; each is sent as its own request.
+        Uses the CML server-side CLI API when available (CML 2.11+); transparently falls back
+        to a direct pyATS/SSH connection on older controllers (console selection only applies
+        to the native API path).
+
+        - Separate multiple commands with newlines.
         - config_command=false (default): exec/operational mode (e.g. "show version").
         - config_command=true: configuration mode -- DO NOT include "configure terminal" or "end".
         - Optional console: pick a non-default serial console (e.g. console=1 for some Docker nodes).
@@ -129,26 +188,9 @@ def register_tools(mcp):
         client = get_cml_client_dep()
 
         try:
-            node_id = await _resolve_node_id_by_label(client, lab_id, str(label))
-            command_lines = [line for line in commands.splitlines() if line.strip()]
-            if not command_lines:
-                raise ToolError("No CLI command was provided")
-
-            outputs = []
-            for command in command_lines:
-                result = await client.post(
-                    f"/labs/{lab_id}/nodes/{node_id}/cli",
-                    data={
-                        "config_command": config_command,
-                        "command": command,
-                        "serial_port": console,
-                        "timeout": 300,
-                    },
-                    timeout=310,  # Slightly above the server-side max CLI timeout (300s).
-                )
-                outputs.append(result if len(command_lines) == 1 else f"Command: {command}\nOutput:\n{result}\n")
-
-            return "".join(outputs) if len(command_lines) > 1 else outputs[0]
+            if await client.supports_native_cli():
+                return await _send_cli_command_native(client, lab_id, str(label), commands, config_command, console)
+            return await _send_cli_command_pyats(client, lab_id, str(label), commands, config_command)
         except httpx.HTTPStatusError as e:
             raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
         except ToolError:
