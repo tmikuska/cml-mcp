@@ -21,7 +21,9 @@ dependencies = [
     "fastapi",
     "pydantic_strict_partial",
     "typer",
+    "packaging",
 ]
+optional-dependencies = { "pyats" = ["pyats", "genie"] }
 [project.scripts]
 cml-mcp = "cml_mcp.__main__:main"
 

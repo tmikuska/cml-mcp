@@ -27,9 +27,15 @@ import os
 from typing import Any
 
 import httpx
+from packaging.version import Version
 
 API_TIMEOUT = 10  # seconds
 MCP_CLIENT_IDENTIFIER = "CmlMCP"
+
+# POST /labs/{lab_id}/nodes/{node_id}/cli was introduced in CML 2.11. Servers
+# older than this do not have the endpoint at all, so CLI execution must fall
+# back to a local Unicon connection for them.
+MIN_NATIVE_CLI_VERSION = Version("2.11")
 
 # Set up logging for this module only
 logger = logging.getLogger("cml-mcp.cml_client")
@@ -65,6 +71,7 @@ class CMLClient(object):
         self._token = None
         self.admin = None
         self.needs_reauth = False
+        self._supports_native_cli: bool | None = None
 
         self.base_url = host.rstrip("/")
         self.api_base = f"{self.base_url}/api/v0"
@@ -149,6 +156,27 @@ class CMLClient(object):
         except Exception:
             logger.exception("Error checking admin status")
             return False
+
+    async def supports_native_cli(self) -> bool:
+        """
+        Check whether the connected CML controller exposes the native
+        POST /labs/{lab_id}/nodes/{node_id}/cli endpoint (added in CML 2.11).
+
+        The result is derived from /system_information's "version" field and
+        cached for the lifetime of this client, since the controller version
+        cannot change mid-session.
+        """
+        if self._supports_native_cli is not None:
+            return self._supports_native_cli
+
+        try:
+            info = await self.get("/system_information")
+            self._supports_native_cli = Version(info["version"]) >= MIN_NATIVE_CLI_VERSION
+        except Exception:
+            logger.exception("Could not determine CML server version; assuming native CLI API is unavailable")
+            self._supports_native_cli = False
+
+        return self._supports_native_cli
 
     async def get(self, endpoint: str, params: dict | None = None, is_binary: bool = False) -> Any:
         """
