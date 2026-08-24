@@ -45,7 +45,11 @@ from cml_mcp.cml.simple_webserver.schemas.annotations import (
     TextAnnotation,
     TextAnnotationResponse,
 )
-from cml_mcp.cml.simple_webserver.schemas.common import AnnotationColor, UUID4Type
+from cml_mcp.cml.simple_webserver.schemas.common import (
+    AnnotationColor,
+    BorderStyleLiteral,
+    UUID4Type,
+)
 from cml_mcp.tools.dependencies import elicit_confirmation, get_cml_client_dep
 from cml_mcp.tools.model_helpers import build_payload, field_from
 
@@ -120,7 +124,10 @@ def register_tools(mcp):
         text_bold: Annotated[bool, field_from(TextAnnotation, "text_bold")],
         text_italic: Annotated[bool, field_from(TextAnnotation, "text_italic")],
         border_color: AnnotationColor,
-        border_style: Annotated[Literal["", "2,2", "4,2"], field_from(TextAnnotation, "border_style")],
+        border_style: Annotated[
+            BorderStyleLiteral,
+            field_from(TextAnnotation, "border_style"),
+        ],
         color: AnnotationColor,
         thickness: Annotated[int, field_from(TextAnnotation, "thickness")],
         z_index: Annotated[int, field_from(TextAnnotation, "z_index")],
@@ -133,7 +140,7 @@ def register_tools(mcp):
 
         Required: x1, y1 (coords -15000 to 15000), text_content (0-8192 chars), text_font (0-128 chars),
         text_size (1-128), text_unit ("pt"/"px"/"em"), text_bold, text_italic (bool),
-        border_color, color (e.g., "#FF0000"), border_style (""/"2,2"/"4,2"), thickness (1-32),
+        border_color, color (e.g., "#FF0000"), border_style ("solid"/"dotted"/"dashed"), thickness (1-32),
         z_index (-10240 to 10240), rotation (0-360 degrees).
 
         Examples:
@@ -185,7 +192,10 @@ def register_tools(mcp):
         x2: CoordinateFloat,
         y2: CoordinateFloat,
         border_color: AnnotationColor,
-        border_style: Annotated[Literal["", "2,2", "4,2"], field_from(RectangleAnnotation, "border_style")],
+        border_style: Annotated[
+            BorderStyleLiteral,
+            field_from(RectangleAnnotation, "border_style"),
+        ],
         color: AnnotationColor,
         thickness: Annotated[int, field_from(RectangleAnnotation, "thickness")],
         z_index: Annotated[int, field_from(RectangleAnnotation, "z_index")],
@@ -199,7 +209,7 @@ def register_tools(mcp):
         All coords -15000..15000.
 
         Required: x1, y1 (anchor coords -15000 to 15000), x2, y2 (WIDTH and HEIGHT from anchor, not corners!),
-        border_color, color (e.g., "#FF0000"), border_style (""/"2,2"/"4,2"), thickness (1-32),
+        border_color, color (e.g., "#FF0000"), border_style ("solid"/"dotted"/"dashed"), thickness (1-32),
         z_index (-10240 to 10240), rotation (0-360 degrees), border_radius (0-128).
 
         Examples:
@@ -248,7 +258,10 @@ def register_tools(mcp):
         x2: CoordinateFloat,
         y2: CoordinateFloat,
         border_color: AnnotationColor,
-        border_style: Annotated[Literal["", "2,2", "4,2"], field_from(EllipseAnnotation, "border_style")],
+        border_style: Annotated[
+            BorderStyleLiteral,
+            field_from(EllipseAnnotation, "border_style"),
+        ],
         color: AnnotationColor,
         thickness: Annotated[int, field_from(EllipseAnnotation, "thickness")],
         z_index: Annotated[int, field_from(EllipseAnnotation, "z_index")],
@@ -261,7 +274,7 @@ def register_tools(mcp):
         the same convention as rectangles). All coords -15000..15000.
 
         Required: x1, y1 (anchor coords -15000 to 15000), x2, y2 (WIDTH and HEIGHT from anchor),
-        border_color, color (e.g., "#FF0000"), border_style (""/"2,2"/"4,2"), thickness (1-32),
+        border_color, color (e.g., "#FF0000"), border_style ("solid"/"dotted"/"dashed"), thickness (1-32),
         z_index (-10240 to 10240), rotation (0-360 degrees).
 
         Examples:
@@ -309,7 +322,10 @@ def register_tools(mcp):
         x2: CoordinateFloat,
         y2: CoordinateFloat,
         border_color: AnnotationColor,
-        border_style: Annotated[Literal["", "2,2", "4,2"], field_from(LineAnnotation, "border_style")],
+        border_style: Annotated[
+            BorderStyleLiteral,
+            field_from(LineAnnotation, "border_style"),
+        ],
         color: AnnotationColor,
         thickness: Annotated[int, field_from(LineAnnotation, "thickness")],
         z_index: Annotated[int, field_from(LineAnnotation, "z_index")],
@@ -323,7 +339,7 @@ def register_tools(mcp):
         All coords -15000..15000.
 
         Required: x1, y1 (start coords -15000 to 15000), x2, y2 (absolute end coords),
-        border_color, color (e.g., "#0000FF"), border_style (""/"2,2"/"4,2"), thickness (1-32),
+        border_color, color (e.g., "#0000FF"), border_style ("solid"/"dotted"/"dashed"), thickness (1-32),
         z_index (-10240 to 10240), line_start, line_end ("arrow"/"square"/"circle" or None).
 
         Examples:
