@@ -19,7 +19,6 @@ import pytest
 from fastmcp.client import Client
 from fastmcp.client.transports import FastMCPTransport
 from mcp.types import TextContent
-
 from cml_mcp import settings
 from cml_mcp.cml.simple_webserver.schemas.common import UUID4Type
 from cml_mcp.cml.simple_webserver.schemas.labs import LabTitle
