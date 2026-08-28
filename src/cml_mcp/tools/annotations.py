@@ -34,6 +34,7 @@ from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import BaseModel
 
+from cml_mcp.border_style import border_style_for_api, border_style_from_api
 from cml_mcp.cml.simple_webserver.schemas.annotations import (
     CoordinateFloat,
     EllipseAnnotation,
@@ -57,6 +58,21 @@ _ANNOTATION_RESPONSE_TYPES: dict[str, type[BaseModel]] = {
     "ellipse": EllipseAnnotationResponse,
     "line": LineAnnotationResponse,
 }
+
+
+BorderStyleInput = Literal["", "2,2", "4,2", "solid", "dotted", "dashed"]
+
+
+def _wire_border_style(payload: dict) -> dict:
+    if "border_style" not in payload:
+        return payload
+    return {**payload, "border_style": border_style_for_api(payload["border_style"])}
+
+
+def _normalize_border_style_fields(annotation: dict) -> dict:
+    if "border_style" not in annotation:
+        return annotation
+    return {**annotation, "border_style": border_style_from_api(annotation["border_style"])}
 
 
 def register_tools(mcp):
@@ -89,6 +105,7 @@ def register_tools(mcp):
                 model = _ANNOTATION_RESPONSE_TYPES.get(ann_type)
                 if model is None:
                     raise ToolError(f"Unknown annotation type: {ann_type!r}. " f"Expected one of {sorted(_ANNOTATION_RESPONSE_TYPES)}.")
+                annotation = _normalize_border_style_fields(annotation)
                 # See model_helpers.py / DEVELOPMENT.md: dump after construction to bypass FastMCP double marshalling.
                 ann_list.append(model(**annotation).model_dump(exclude_unset=True))
             return ann_list
@@ -120,7 +137,7 @@ def register_tools(mcp):
         text_bold: Annotated[bool, field_from(TextAnnotation, "text_bold")],
         text_italic: Annotated[bool, field_from(TextAnnotation, "text_italic")],
         border_color: AnnotationColor,
-        border_style: Annotated[Literal["", "2,2", "4,2"], field_from(TextAnnotation, "border_style")],
+        border_style: Annotated[BorderStyleInput, field_from(TextAnnotation, "border_style")],
         color: AnnotationColor,
         thickness: Annotated[int, field_from(TextAnnotation, "thickness")],
         z_index: Annotated[int, field_from(TextAnnotation, "z_index")],
@@ -160,7 +177,7 @@ def register_tools(mcp):
                 z_index=z_index,
                 rotation=rotation,
             )
-            resp = await client.post(f"/labs/{lab_id}/annotations", data=payload)
+            resp = await client.post(f"/labs/{lab_id}/annotations", data=_wire_border_style(payload))
             return UUID4Type(resp["id"])
         except httpx.HTTPStatusError as e:
             raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
@@ -185,7 +202,7 @@ def register_tools(mcp):
         x2: CoordinateFloat,
         y2: CoordinateFloat,
         border_color: AnnotationColor,
-        border_style: Annotated[Literal["", "2,2", "4,2"], field_from(RectangleAnnotation, "border_style")],
+        border_style: Annotated[BorderStyleInput, field_from(RectangleAnnotation, "border_style")],
         color: AnnotationColor,
         thickness: Annotated[int, field_from(RectangleAnnotation, "thickness")],
         z_index: Annotated[int, field_from(RectangleAnnotation, "z_index")],
@@ -223,7 +240,7 @@ def register_tools(mcp):
                 rotation=rotation,
                 border_radius=border_radius,
             )
-            resp = await client.post(f"/labs/{lab_id}/annotations", data=payload)
+            resp = await client.post(f"/labs/{lab_id}/annotations", data=_wire_border_style(payload))
             return UUID4Type(resp["id"])
         except httpx.HTTPStatusError as e:
             raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
@@ -248,7 +265,7 @@ def register_tools(mcp):
         x2: CoordinateFloat,
         y2: CoordinateFloat,
         border_color: AnnotationColor,
-        border_style: Annotated[Literal["", "2,2", "4,2"], field_from(EllipseAnnotation, "border_style")],
+        border_style: Annotated[BorderStyleInput, field_from(EllipseAnnotation, "border_style")],
         color: AnnotationColor,
         thickness: Annotated[int, field_from(EllipseAnnotation, "thickness")],
         z_index: Annotated[int, field_from(EllipseAnnotation, "z_index")],
@@ -284,7 +301,7 @@ def register_tools(mcp):
                 z_index=z_index,
                 rotation=rotation,
             )
-            resp = await client.post(f"/labs/{lab_id}/annotations", data=payload)
+            resp = await client.post(f"/labs/{lab_id}/annotations", data=_wire_border_style(payload))
             return UUID4Type(resp["id"])
         except httpx.HTTPStatusError as e:
             raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
@@ -309,7 +326,7 @@ def register_tools(mcp):
         x2: CoordinateFloat,
         y2: CoordinateFloat,
         border_color: AnnotationColor,
-        border_style: Annotated[Literal["", "2,2", "4,2"], field_from(LineAnnotation, "border_style")],
+        border_style: Annotated[BorderStyleInput, field_from(LineAnnotation, "border_style")],
         color: AnnotationColor,
         thickness: Annotated[int, field_from(LineAnnotation, "thickness")],
         z_index: Annotated[int, field_from(LineAnnotation, "z_index")],
@@ -349,7 +366,7 @@ def register_tools(mcp):
             # so include them explicitly rather than dropping via build_payload.
             payload["line_start"] = line_start
             payload["line_end"] = line_end
-            resp = await client.post(f"/labs/{lab_id}/annotations", data=payload)
+            resp = await client.post(f"/labs/{lab_id}/annotations", data=_wire_border_style(payload))
             return UUID4Type(resp["id"])
         except httpx.HTTPStatusError as e:
             raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")

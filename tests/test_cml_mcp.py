@@ -594,6 +594,76 @@ async def test_add_annotation_to_cml_lab(main_mcp_client: Client[FastMCPTranspor
             assert annotation.type in {"ellipse", "line", "rectangle", "text"}
 
 
+def _line_annotation_payload(border_style: str) -> dict:
+    return {
+        "type": "line",
+        "border_color": "#000000",
+        "border_style": border_style,
+        "color": "#ffffff",
+        "thickness": 1,
+        "x1": -9000,
+        "y1": -9000,
+        "x2": -8900,
+        "y2": -8900,
+        "z_index": 9999,
+        "line_start": "arrow",
+        "line_end": "arrow",
+    }
+
+
+@pytest.mark.live_only
+async def test_cml_api_rejects_canonical_border_style_direct(live_cml_api_client, created_lab: UUID4Type):
+    """CML REST API rejects dashed without legacy wire conversion."""
+    await live_cml_api_client.check_authentication()
+    url = f"{live_cml_api_client.api_base}/labs/{created_lab}/annotations"
+    resp = await live_cml_api_client.client.post(
+        url,
+        json=_line_annotation_payload("dashed"),
+    )
+    assert resp.status_code == 400, resp.text
+
+
+@pytest.mark.live_only
+async def test_mcp_accepts_canonical_border_style_alias(
+    main_mcp_client: Client[FastMCPTransport],
+    created_lab: UUID4Type,
+):
+    """MCP tools accept dashed and write legacy 4,2 wire to the API."""
+    add_result = await main_mcp_client.call_tool(
+        name="add_line_annotation",
+        arguments={
+            "lab_id": created_lab,
+            "x1": -9000,
+            "y1": -9000,
+            "x2": -8900,
+            "y2": -8900,
+            "border_color": "#000000",
+            "border_style": "dashed",
+            "color": "#ffffff",
+            "thickness": 1,
+            "z_index": 9999,
+            "line_start": "arrow",
+            "line_end": "arrow",
+        },
+    )
+    assert isinstance(add_result.content, list)
+    assert len(add_result.content) > 0
+    assert isinstance(add_result.content[0], TextContent)
+    annotation_id = UUID4Type(add_result.content[0].text)
+
+    list_result = await main_mcp_client.call_tool(
+        name="get_annotations_for_cml_lab",
+        arguments={"lab_id": created_lab},
+    )
+    matching = [
+        ann
+        for ann in list_result.data
+        if ann.get("id") == str(annotation_id) or ann.get("id") == annotation_id
+    ]
+    assert matching, "Created annotation not returned by get_annotations_for_cml_lab"
+    assert matching[0]["border_style"] == "4,2"
+
+
 @pytest.mark.live_only
 async def test_connect_two_nodes(main_mcp_client: Client[FastMCPTransport], created_lab: UUID4Type):
     lab_id = created_lab
