@@ -6,5 +6,26 @@
   },
   "nodes": [],
   "links": [],
-  "annotations": []
+  "annotations": [
+    {
+      "type": "line",
+      "border_color": "#0000FF",
+      "border_style": "4,2",
+      "color": "#0000FF",
+      "thickness": 2,
+      "x1": 100.0,
+      "y1": 100.0,
+      "x2": 200.0,
+      "y2": 200.0,
+      "z_index": 1,
+      "line_start": "arrow",
+      "line_end": "circle"
+    }
+  ],
+  "smart_annotations": [
+    {
+      "tag": "core",
+      "border_style": "2,2"
+    }
+  ]
 }

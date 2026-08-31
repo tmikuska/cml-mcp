@@ -34,7 +34,6 @@ from fastmcp.client import Client
 from fastmcp.client.transports import FastMCPTransport
 from inline_snapshot import snapshot  # , outsource
 from mcp.types import TextContent
-from virl2_client.utils import Version
 
 from cml_mcp.cml.simple_webserver.schemas.annotations import (
     EllipseAnnotationResponse,
@@ -614,10 +613,7 @@ def _line_annotation_payload(border_style: str) -> dict:
 
 @pytest.mark.live_only
 async def test_cml_api_rejects_canonical_border_style_direct(live_cml_api_client, created_lab: UUID4Type):
-    """CML REST API rejects dashed without legacy wire conversion on pre-2.11 controllers."""
-    if live_cml_api_client.controller_version >= Version("2.11.0"):
-        pytest.skip("Controller already accepts canonical border_style wire values")
-
+    """CML REST API rejects dashed without legacy wire conversion."""
     await live_cml_api_client.check_authentication()
     url = f"{live_cml_api_client.api_base}/labs/{created_lab}/annotations"
     resp = await live_cml_api_client.client.post(
@@ -858,6 +854,9 @@ async def test_download_lab_topology(main_mcp_client: Client[FastMCPTransport], 
     yaml_content = download_result.content[0].text
     assert isinstance(yaml_content, str)
     assert len(yaml_content) > 0
+    parsed = yaml.safe_load(yaml_content)
+    assert parsed["annotations"][0]["border_style"] == "dashed"
+    assert parsed["smart_annotations"][0]["border_style"] == "dotted"
 
 
 @pytest.mark.mock_only

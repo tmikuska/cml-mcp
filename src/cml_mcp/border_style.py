@@ -7,12 +7,6 @@ from __future__ import annotations
 
 from typing import Literal
 
-from virl2_client.utils import Version
-
-# Match the CML release that ships canonical border_style on the REST API.
-# If 2.11.0 releases without that change, bump this to the release that includes it.
-CANONICAL_BORDER_STYLE_MIN_VERSION = Version("2.11.0")
-
 CANONICAL_BORDER_STYLES = ("solid", "dotted", "dashed")
 BorderStyleLiteral = Literal["solid", "dotted", "dashed"]
 
@@ -33,16 +27,31 @@ def _to_canonical(value: str) -> str:
     return _LEGACY_TO_CANONICAL[value]
 
 
-def border_style_from_api(value: str, controller_version: Version) -> str:
-    if controller_version >= CANONICAL_BORDER_STYLE_MIN_VERSION:
-        if value not in CANONICAL_BORDER_STYLES:
-            raise ValueError(f"Unexpected border_style from controller: {value!r}")
+def border_style_from_api(value: str) -> str:
+    """Normalize CML REST API border_style to canonical MCP values."""
+    if value in CANONICAL_BORDER_STYLES:
         return value
     return _LEGACY_TO_CANONICAL[value]
 
 
-def border_style_for_api(value: str, controller_version: Version) -> str:
-    canonical = _to_canonical(value)
-    if controller_version >= CANONICAL_BORDER_STYLE_MIN_VERSION:
-        return canonical
-    return _CANONICAL_TO_LEGACY[canonical]
+def border_style_for_api(value: str) -> str:
+    """Serialize MCP border_style to legacy CML REST API wire values."""
+    return _CANONICAL_TO_LEGACY[_to_canonical(value)]
+
+
+def _map_topology_border_styles(payload: dict, transform) -> dict:
+    for key in ("annotations", "smart_annotations"):
+        for item in payload.get(key, []):
+            if isinstance(item, dict) and "border_style" in item:
+                item["border_style"] = transform(str(item["border_style"]))
+    return payload
+
+
+def wire_topology_border_styles(payload: dict) -> dict:
+    """Convert canonical border_style values in a topology import payload."""
+    return _map_topology_border_styles(payload, border_style_for_api)
+
+
+def normalize_topology_border_styles(payload: dict) -> dict:
+    """Convert legacy border_style values in a topology payload to canonical MCP values."""
+    return _map_topology_border_styles(payload, border_style_from_api)

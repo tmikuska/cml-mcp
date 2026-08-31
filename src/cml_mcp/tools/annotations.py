@@ -64,27 +64,21 @@ _ANNOTATION_RESPONSE_TYPES: dict[str, type[BaseModel]] = {
 }
 
 
-def _wire_border_style(client, payload: dict) -> dict:
+def _wire_border_style(payload: dict) -> dict:
     if "border_style" not in payload:
         return payload
     return {
         **payload,
-        "border_style": border_style_for_api(
-            payload["border_style"],
-            client.controller_version,
-        ),
+        "border_style": border_style_for_api(payload["border_style"]),
     }
 
 
-def _normalize_border_style_fields(client, annotation: dict) -> dict:
+def _normalize_border_style_fields(annotation: dict) -> dict:
     if "border_style" not in annotation:
         return annotation
     return {
         **annotation,
-        "border_style": border_style_from_api(
-            annotation["border_style"],
-            client.controller_version,
-        ),
+        "border_style": border_style_from_api(annotation["border_style"]),
     }
 
 
@@ -118,7 +112,7 @@ def register_tools(mcp):
                 model = _ANNOTATION_RESPONSE_TYPES.get(ann_type)
                 if model is None:
                     raise ToolError(f"Unknown annotation type: {ann_type!r}. " f"Expected one of {sorted(_ANNOTATION_RESPONSE_TYPES)}.")
-                annotation = _normalize_border_style_fields(client, annotation)
+                annotation = _normalize_border_style_fields(annotation)
                 # See model_helpers.py / DEVELOPMENT.md: dump after construction to bypass FastMCP double marshalling.
                 ann_list.append(model(**annotation).model_dump(exclude_unset=True))
             return ann_list
@@ -193,7 +187,7 @@ def register_tools(mcp):
                 z_index=z_index,
                 rotation=rotation,
             )
-            resp = await client.post(f"/labs/{lab_id}/annotations", data=_wire_border_style(client, payload))
+            resp = await client.post(f"/labs/{lab_id}/annotations", data=_wire_border_style(payload))
             return UUID4Type(resp["id"])
         except httpx.HTTPStatusError as e:
             raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
@@ -259,7 +253,7 @@ def register_tools(mcp):
                 rotation=rotation,
                 border_radius=border_radius,
             )
-            resp = await client.post(f"/labs/{lab_id}/annotations", data=_wire_border_style(client, payload))
+            resp = await client.post(f"/labs/{lab_id}/annotations", data=_wire_border_style(payload))
             return UUID4Type(resp["id"])
         except httpx.HTTPStatusError as e:
             raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
@@ -323,7 +317,7 @@ def register_tools(mcp):
                 z_index=z_index,
                 rotation=rotation,
             )
-            resp = await client.post(f"/labs/{lab_id}/annotations", data=_wire_border_style(client, payload))
+            resp = await client.post(f"/labs/{lab_id}/annotations", data=_wire_border_style(payload))
             return UUID4Type(resp["id"])
         except httpx.HTTPStatusError as e:
             raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
@@ -391,7 +385,7 @@ def register_tools(mcp):
             # so include them explicitly rather than dropping via build_payload.
             payload["line_start"] = line_start
             payload["line_end"] = line_end
-            resp = await client.post(f"/labs/{lab_id}/annotations", data=_wire_border_style(client, payload))
+            resp = await client.post(f"/labs/{lab_id}/annotations", data=_wire_border_style(payload))
             return UUID4Type(resp["id"])
         except httpx.HTTPStatusError as e:
             raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")

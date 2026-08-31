@@ -10,6 +10,7 @@ from fastapi import Body
 from pydantic import BaseModel, Field
 from pydantic_strict_partial import create_partial_model
 
+from cml_mcp.border_style import BorderStyleLiteral
 from simple_webserver.schemas.common import (
     COLOR_EXAMPLES_STR,
     AnnotationColor,
@@ -44,7 +45,10 @@ class AnnotationBase(BaseModel):
     )
     border_style: BorderStyle = Field(
         ...,
-        description='Border style: "solid", "dotted", or "dashed".',
+        description=(
+            "String defining border style - 3 values corresponding to UI values are allowed. "
+            '("" - solid; "2,2" - dotted; "4,2" - dashed)'
+        ),
     )
     color: AnnotationColor = Field(
         ..., description=f"Fill color of the annotation {COLOR_EXAMPLES_STR}."
@@ -150,18 +154,22 @@ AnnotationUuidDescription = "Annotation Unique identifier."
 # explicitly set extra='forbid' to raise ResponseValidationError
 # when data not present in schema is about to be exposed to user
 class TextAnnotationResponse(TextAnnotation, extra="forbid"):
+    border_style: BorderStyleLiteral
     id: UUID4Type = Field(..., description=AnnotationUuidDescription)
 
 
 class RectangleAnnotationResponse(RectangleAnnotation, extra="forbid"):
+    border_style: BorderStyleLiteral
     id: UUID4Type = Field(..., description=AnnotationUuidDescription)
 
 
 class EllipseAnnotationResponse(EllipseAnnotation, extra="forbid"):
+    border_style: BorderStyleLiteral
     id: UUID4Type = Field(..., description=AnnotationUuidDescription)
 
 
 class LineAnnotationResponse(LineAnnotation, extra="forbid"):
+    border_style: BorderStyleLiteral
     id: UUID4Type = Field(..., description=AnnotationUuidDescription)
 
 
