@@ -33,7 +33,7 @@ Annotations are visual only — they don't affect connectivity. Two ways to grou
 
 **Manual annotations** (`add_text_annotation`, `add_rectangle_annotation`, `add_ellipse_annotation`, `add_line_annotation`) when you need exact placement. Common arguments:
 
-- All shapes: `x1`/`y1` anchor, plus `x2`/`y2` for width/height (rectangle/ellipse) or end point (line); `color` (fill), `border_color`, `border_style` (`""` solid, `"2,2"` dotted, `"4,2"` dashed), `thickness`, `z_index`.
+- All shapes: `x1`/`y1` anchor, plus `x2`/`y2` for width/height (rectangle/ellipse) or end point (line); `color` (fill), `border_color`, `border_style` (`solid`, `dotted`, `dashed`), `thickness`, `z_index`.
 - Text: `text_content`, `text_size`, `text_font`, `text_bold`, `text_italic`, `text_unit` (`pt`/`px`/`em`).
 - Lines: `line_start`/`line_end` arrowheads (`arrow`/`square`/`circle`).
 - Colors accept `#RRGGBB`, `rgba(...)`, or CSS names. Use translucent fills (low rgba alpha) for zone boxes so device icons stay visible. Put boxes on a low/negative `z_index` so they sit behind nodes.

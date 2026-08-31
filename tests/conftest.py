@@ -17,6 +17,7 @@ import pytest
 from fastmcp.client import Client
 from fastmcp.client.transports import FastMCPTransport
 from mcp.types import TextContent
+from virl2_client.utils import Version
 
 from cml_mcp.cml.simple_webserver.schemas.common import UUID4Type
 from cml_mcp.cml.simple_webserver.schemas.labs import LabTitle
@@ -64,6 +65,10 @@ class MockCMLClient:
             "packet_captures": {},
         }
         self._next_id = 1000
+
+    @property
+    def controller_version(self) -> Version:
+        return Version("2.11.0")
 
     def _generate_id(self) -> str:
         """Generate a unique ID for created resources."""

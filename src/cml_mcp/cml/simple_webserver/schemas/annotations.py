@@ -44,10 +44,7 @@ class AnnotationBase(BaseModel):
     )
     border_style: BorderStyle = Field(
         ...,
-        description=(
-            "String defining border style - 3 values corresponding to UI values are allowed. "
-            '("" - solid; "2,2" - dotted; "4,2" - dashed)'
-        ),
+        description='Border style: "solid", "dotted", or "dashed".',
     )
     color: AnnotationColor = Field(
         ..., description=f"Fill color of the annotation {COLOR_EXAMPLES_STR}."

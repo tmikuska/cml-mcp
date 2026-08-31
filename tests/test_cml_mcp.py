@@ -34,6 +34,7 @@ from fastmcp.client import Client
 from fastmcp.client.transports import FastMCPTransport
 from inline_snapshot import snapshot  # , outsource
 from mcp.types import TextContent
+from virl2_client.utils import Version
 
 from cml_mcp.cml.simple_webserver.schemas.annotations import (
     EllipseAnnotationResponse,
@@ -488,7 +489,7 @@ async def test_add_annotation_to_cml_lab(main_mcp_client: Client[FastMCPTranspor
             "y2": 200,
             "border_color": "#FF0000",
             "thickness": 2,
-            "border_style": "4,2",
+            "border_style": "dashed",
             "rotation": 15,
             "color": "#00FF00",
             "z_index": 1,
@@ -510,7 +511,7 @@ async def test_add_annotation_to_cml_lab(main_mcp_client: Client[FastMCPTranspor
             "color": "#0000FF",
             "z_index": 2,
             "thickness": 3,
-            "border_style": "",
+            "border_style": "solid",
             "border_color": "#0000FF",
             "line_start": "arrow",
             "line_end": "circle",
@@ -531,7 +532,7 @@ async def test_add_annotation_to_cml_lab(main_mcp_client: Client[FastMCPTranspor
             "y2": 275,
             "border_color": "#FFFF00",
             "thickness": 4,
-            "border_style": "",
+            "border_style": "solid",
             "color": "#FF00FF",
             "z_index": 3,
             "border_radius": 10,
@@ -559,7 +560,7 @@ async def test_add_annotation_to_cml_lab(main_mcp_client: Client[FastMCPTranspor
             "text_size": 14,
             "text_unit": "px",
             "thickness": 1,
-            "border_style": "2,2",
+            "border_style": "dotted",
             "border_color": "#000000",
         },
     )
@@ -613,7 +614,10 @@ def _line_annotation_payload(border_style: str) -> dict:
 
 @pytest.mark.live_only
 async def test_cml_api_rejects_canonical_border_style_direct(live_cml_api_client, created_lab: UUID4Type):
-    """CML REST API rejects dashed without legacy wire conversion."""
+    """CML REST API rejects dashed without legacy wire conversion on pre-2.11 controllers."""
+    if live_cml_api_client.controller_version >= Version("2.11.0"):
+        pytest.skip("Controller already accepts canonical border_style wire values")
+
     await live_cml_api_client.check_authentication()
     url = f"{live_cml_api_client.api_base}/labs/{created_lab}/annotations"
     resp = await live_cml_api_client.client.post(
@@ -628,7 +632,7 @@ async def test_mcp_accepts_canonical_border_style_alias(
     main_mcp_client: Client[FastMCPTransport],
     created_lab: UUID4Type,
 ):
-    """MCP tools accept dashed and write legacy 4,2 wire to the API."""
+    """MCP tools accept dashed and return canonical border_style to callers."""
     add_result = await main_mcp_client.call_tool(
         name="add_line_annotation",
         arguments={
@@ -655,13 +659,14 @@ async def test_mcp_accepts_canonical_border_style_alias(
         name="get_annotations_for_cml_lab",
         arguments={"lab_id": created_lab},
     )
-    matching = [
-        ann
-        for ann in list_result.data
-        if ann.get("id") == str(annotation_id) or ann.get("id") == annotation_id
-    ]
+    matching = []
+    for ann in list_result.data:
+        if not isinstance(ann, dict):
+            ann = vars(ann) if hasattr(ann, "__dict__") else dict(ann)
+        if ann.get("id") == str(annotation_id) or ann.get("id") == annotation_id:
+            matching.append(ann)
     assert matching, "Created annotation not returned by get_annotations_for_cml_lab"
-    assert matching[0]["border_style"] == "4,2"
+    assert matching[0]["border_style"] == "dashed"
 
 
 @pytest.mark.live_only

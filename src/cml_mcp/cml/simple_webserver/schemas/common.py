@@ -5,7 +5,7 @@
 #
 from datetime import UTC, datetime
 from enum import StrEnum, auto
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import (
     AfterValidator,
@@ -223,9 +223,13 @@ EffectivePermissions = Annotated[
 
 
 class BorderStyle(StrEnum):
-    SOLID = ""
-    DOTTED = "2,2"
-    DASHED = "4,2"
+    SOLID = "solid"
+    DOTTED = "dotted"
+    DASHED = "dashed"
+
+
+CANONICAL_BORDER_STYLES = ("solid", "dotted", "dashed")
+BorderStyleLiteral = Literal["solid", "dotted", "dashed"]
 
 
 COLOR_EXAMPLES = ["#FF00FF", "rgba(255, 0, 0, 0.5)", "lightgoldenrodyellow"]
