@@ -112,14 +112,15 @@ async def create_full_topology_from_obj(topology: Topology, client: CMLClient) -
     Create complete lab from Topology object.
 
     Args:
-        topology (Topology): The topology object.
+        topology (Topology): The topology object (canonical MCP border_style values).
         client (CMLClient): The CML client instance.
 
     Returns:
         UUID4Type: The lab UUID.
     """
     payload = topology.model_dump(mode="json", exclude_unset=True, exclude_none=True)
-    resp = await client.post("/import", data=wire_topology_border_styles(payload))
+    wire_topology_border_styles(payload)
+    resp = await client.post("/import", data=payload)
     return UUID4Type(resp["id"])
 
 
@@ -339,9 +340,7 @@ def register_tools(mcp):  # noqa: C901
         client = get_cml_client_dep()
         try:
             if isinstance(topology, (dict, str)):
-                data = parse_json_arg(topology)
-                wire_topology_border_styles(data)
-                topology = lenient_construct(Topology, data)
+                topology = lenient_construct(Topology, parse_json_arg(topology))
             return await create_full_topology_from_obj(topology, client)
         except httpx.HTTPStatusError as e:
             raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
@@ -559,7 +558,6 @@ def register_tools(mcp):  # noqa: C901
             else:
                 yaml_data["lab"]["title"] = f"Copy of {yaml_data['lab']['title']}"
 
-            wire_topology_border_styles(yaml_data)
             topology = Topology(**yaml_data)
             return await create_full_topology_from_obj(topology, client)
         except httpx.HTTPStatusError as e:

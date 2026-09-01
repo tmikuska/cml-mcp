@@ -90,7 +90,7 @@ def test_topology_border_style_write_read_roundtrip():
 
 
 @pytest.mark.asyncio
-async def test_create_full_topology_wires_border_style_for_import():
+async def test_create_full_topology_posts_legacy_wire_from_topology_model():
     from cml_mcp.cml.simple_webserver.schemas.topologies import Topology
     from cml_mcp.tools.labs import create_full_topology_from_obj
 
@@ -124,9 +124,68 @@ async def test_create_full_topology_wires_border_style_for_import():
         ],
         "smart_annotations": [{"tag": "core", "border_style": "dotted"}],
     }
-    wire_topology_border_styles(payload)
     topology = Topology(**payload)
     await create_full_topology_from_obj(topology, FakeClient())  # type: ignore[arg-type]
     assert posted["endpoint"] == "/import"
     assert posted["data"]["annotations"][0]["border_style"] == "4,2"
     assert posted["data"]["smart_annotations"][0]["border_style"] == "2,2"
+
+
+def _find_empty_string_enums(schema: object) -> list[str]:
+    paths: list[str] = []
+
+    def walk(obj: object, path: str = "") -> None:
+        if isinstance(obj, dict):
+            enum = obj.get("enum")
+            if isinstance(enum, list) and "" in enum:
+                paths.append(path or "<root>")
+            for key, value in obj.items():
+                walk(value, f"{path}.{key}" if path else str(key))
+        elif isinstance(obj, list):
+            for index, value in enumerate(obj):
+                walk(value, f"{path}[{index}]")
+
+    walk(schema)
+    return paths
+
+
+@pytest.mark.asyncio
+async def test_tool_input_schemas_have_no_empty_string_enums():
+    """Gemini and strict MCP gateways reject enum values that include \"\"."""
+    import importlib
+
+    import virl2_client
+    from fastmcp import FastMCP
+
+    virl2_client.ClientLibrary = lambda *args, **kwargs: type(
+        "FakeClientLibrary",
+        (),
+        {"check_controller_version": lambda self: "2.10.0"},
+    )()
+
+    module_names = [
+        "system",
+        "users_groups",
+        "node_definitions",
+        "labs",
+        "nodes",
+        "interfaces",
+        "links",
+        "annotations",
+        "pcap",
+    ]
+    offenders: dict[str, list[str]] = {}
+    for module_name in module_names:
+        module = importlib.import_module(f"cml_mcp.tools.{module_name}")
+        mcp = FastMCP("schema-test")
+        module.register_tools(mcp)
+        tools = await mcp.list_tools()
+        for tool in tools:
+            schema = tool.parameters
+            if hasattr(schema, "model_dump"):
+                schema = schema.model_dump()
+            bad_paths = _find_empty_string_enums(schema)
+            if bad_paths:
+                offenders[tool.name] = bad_paths
+
+    assert offenders == {}, offenders

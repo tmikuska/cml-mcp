@@ -281,21 +281,25 @@ async def test_get_annotations_for_cml_lab(main_mcp_client: Client[FastMCPTransp
                 assert annotation.x1 == snapshot(150.0)
                 assert annotation.y1 == snapshot(150.0)
                 assert annotation.rotation == snapshot(15)
+                assert annotation.border_style == "dashed"
             elif ann_type == "line":
                 annotation = LineAnnotationResponse(**annotation)
                 assert annotation.type == "line"
                 assert annotation.line_start == snapshot("arrow")
                 assert annotation.line_end == snapshot("circle")
+                assert annotation.border_style == "solid"
             elif ann_type == "rectangle":
                 annotation = RectangleAnnotationResponse(**annotation)
                 assert annotation.type == "rectangle"
                 assert annotation.border_radius == snapshot(10)
+                assert annotation.border_style == "solid"
             elif ann_type == "text":
                 annotation = TextAnnotationResponse(**annotation)
                 assert annotation.type == "text"
                 assert annotation.text_content == snapshot("This is a test annotation")
                 assert annotation.text_bold is True
                 assert annotation.text_italic is False
+                assert annotation.border_style == "dotted"
             else:
                 pytest.fail(f"Unknown annotation type: {ann_type}")
 

@@ -8,10 +8,10 @@ from typing import Annotated
 from fastapi import Body
 from pydantic import BaseModel, Field
 
+from cml_mcp.border_style import BorderStyleLiteral
 from simple_webserver.schemas.common import (
     COLOR_EXAMPLES_STR,
     AnnotationColor,
-    BorderStyle,
     OneLineStr,
     UUID4Type,
 )
@@ -73,12 +73,9 @@ class SmartAnnotationBase(BaseModel):
         le=32,
         description="Thickness of the smart annotation's border or line.",
     )
-    border_style: BorderStyle = Field(
-        default=BorderStyle.SOLID,
-        description=(
-            "Border style of the smart annotation - 3 values corresponding "
-            'to UI values are allowed ("" - solid; "2,2" - dotted; "4,2" - dashed).'
-        ),
+    border_style: BorderStyleLiteral = Field(
+        default="solid",
+        description="Border style: solid, dotted, or dashed.",
     )
     fill_color: AnnotationColor = Field(
         default=None,

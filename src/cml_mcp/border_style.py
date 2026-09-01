@@ -29,9 +29,7 @@ def _to_canonical(value: str) -> str:
 
 def border_style_from_api(value: str) -> str:
     """Normalize CML REST API border_style to canonical MCP values."""
-    if value in CANONICAL_BORDER_STYLES:
-        return value
-    return _LEGACY_TO_CANONICAL[value]
+    return _to_canonical(value)
 
 
 def border_style_for_api(value: str) -> str:

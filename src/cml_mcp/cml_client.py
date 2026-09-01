@@ -80,11 +80,6 @@ class CMLClient(object):
         self.client.headers.update({"X-CML-CLIENT": MCP_CLIENT_IDENTIFIER})
 
     @property
-    def controller_version(self):
-        """CML controller version detected at ClientLibrary init."""
-        return self.vclient._session.controller_version
-
-    @property
     def token(self) -> str | None:
         return self._token
 
