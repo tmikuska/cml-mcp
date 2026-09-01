@@ -10,10 +10,10 @@ from fastapi import Body
 from pydantic import BaseModel, Field
 from pydantic_strict_partial import create_partial_model
 
+from cml_mcp.border_style import BorderStyleLiteral
 from simple_webserver.schemas.common import (
     COLOR_EXAMPLES_STR,
     AnnotationColor,
-    BorderStyle,
     MultiLineStr,
     OneLineStr,
     UUID4Type,
@@ -42,12 +42,9 @@ class AnnotationBase(BaseModel):
     border_color: AnnotationColor = Field(
         ..., description=f"Border color, of the annotation {COLOR_EXAMPLES_STR}."
     )
-    border_style: BorderStyle = Field(
+    border_style: BorderStyleLiteral = Field(
         ...,
-        description=(
-            "String defining border style - 3 values corresponding to UI values are allowed. "
-            '("" - solid; "2,2" - dotted; "4,2" - dashed)'
-        ),
+        description="Border style: solid, dotted, or dashed.",
     )
     color: AnnotationColor = Field(
         ..., description=f"Fill color of the annotation {COLOR_EXAMPLES_STR}."

@@ -281,21 +281,25 @@ async def test_get_annotations_for_cml_lab(main_mcp_client: Client[FastMCPTransp
                 assert annotation.x1 == snapshot(150.0)
                 assert annotation.y1 == snapshot(150.0)
                 assert annotation.rotation == snapshot(15)
+                assert annotation.border_style == "dashed"
             elif ann_type == "line":
                 annotation = LineAnnotationResponse(**annotation)
                 assert annotation.type == "line"
                 assert annotation.line_start == snapshot("arrow")
                 assert annotation.line_end == snapshot("circle")
+                assert annotation.border_style == "solid"
             elif ann_type == "rectangle":
                 annotation = RectangleAnnotationResponse(**annotation)
                 assert annotation.type == "rectangle"
                 assert annotation.border_radius == snapshot(10)
+                assert annotation.border_style == "solid"
             elif ann_type == "text":
                 annotation = TextAnnotationResponse(**annotation)
                 assert annotation.type == "text"
                 assert annotation.text_content == snapshot("This is a test annotation")
                 assert annotation.text_bold is True
                 assert annotation.text_italic is False
+                assert annotation.border_style == "dotted"
             else:
                 pytest.fail(f"Unknown annotation type: {ann_type}")
 
@@ -488,7 +492,7 @@ async def test_add_annotation_to_cml_lab(main_mcp_client: Client[FastMCPTranspor
             "y2": 200,
             "border_color": "#FF0000",
             "thickness": 2,
-            "border_style": "4,2",
+            "border_style": "dashed",
             "rotation": 15,
             "color": "#00FF00",
             "z_index": 1,
@@ -510,7 +514,7 @@ async def test_add_annotation_to_cml_lab(main_mcp_client: Client[FastMCPTranspor
             "color": "#0000FF",
             "z_index": 2,
             "thickness": 3,
-            "border_style": "",
+            "border_style": "solid",
             "border_color": "#0000FF",
             "line_start": "arrow",
             "line_end": "circle",
@@ -531,7 +535,7 @@ async def test_add_annotation_to_cml_lab(main_mcp_client: Client[FastMCPTranspor
             "y2": 275,
             "border_color": "#FFFF00",
             "thickness": 4,
-            "border_style": "",
+            "border_style": "solid",
             "color": "#FF00FF",
             "z_index": 3,
             "border_radius": 10,
@@ -559,7 +563,7 @@ async def test_add_annotation_to_cml_lab(main_mcp_client: Client[FastMCPTranspor
             "text_size": 14,
             "text_unit": "px",
             "thickness": 1,
-            "border_style": "2,2",
+            "border_style": "dotted",
             "border_color": "#000000",
         },
     )
@@ -592,6 +596,77 @@ async def test_add_annotation_to_cml_lab(main_mcp_client: Client[FastMCPTranspor
             elif ann_type == "text":
                 annotation = TextAnnotationResponse(**annotation)
             assert annotation.type in {"ellipse", "line", "rectangle", "text"}
+
+
+def _line_annotation_payload(border_style: str) -> dict:
+    return {
+        "type": "line",
+        "border_color": "#000000",
+        "border_style": border_style,
+        "color": "#ffffff",
+        "thickness": 1,
+        "x1": -9000,
+        "y1": -9000,
+        "x2": -8900,
+        "y2": -8900,
+        "z_index": 9999,
+        "line_start": "arrow",
+        "line_end": "arrow",
+    }
+
+
+@pytest.mark.live_only
+async def test_cml_api_rejects_canonical_border_style_direct(live_cml_api_client, created_lab: UUID4Type):
+    """CML REST API rejects dashed without legacy wire conversion."""
+    await live_cml_api_client.check_authentication()
+    url = f"{live_cml_api_client.api_base}/labs/{created_lab}/annotations"
+    resp = await live_cml_api_client.client.post(
+        url,
+        json=_line_annotation_payload("dashed"),
+    )
+    assert resp.status_code == 400, resp.text
+
+
+@pytest.mark.live_only
+async def test_mcp_accepts_canonical_border_style_alias(
+    main_mcp_client: Client[FastMCPTransport],
+    created_lab: UUID4Type,
+):
+    """MCP tools accept dashed and return canonical border_style to callers."""
+    add_result = await main_mcp_client.call_tool(
+        name="add_line_annotation",
+        arguments={
+            "lab_id": created_lab,
+            "x1": -9000,
+            "y1": -9000,
+            "x2": -8900,
+            "y2": -8900,
+            "border_color": "#000000",
+            "border_style": "dashed",
+            "color": "#ffffff",
+            "thickness": 1,
+            "z_index": 9999,
+            "line_start": "arrow",
+            "line_end": "arrow",
+        },
+    )
+    assert isinstance(add_result.content, list)
+    assert len(add_result.content) > 0
+    assert isinstance(add_result.content[0], TextContent)
+    annotation_id = UUID4Type(add_result.content[0].text)
+
+    list_result = await main_mcp_client.call_tool(
+        name="get_annotations_for_cml_lab",
+        arguments={"lab_id": created_lab},
+    )
+    matching = []
+    for ann in list_result.data:
+        if not isinstance(ann, dict):
+            ann = vars(ann) if hasattr(ann, "__dict__") else dict(ann)
+        if ann.get("id") == str(annotation_id) or ann.get("id") == annotation_id:
+            matching.append(ann)
+    assert matching, "Created annotation not returned by get_annotations_for_cml_lab"
+    assert matching[0]["border_style"] == "dashed"
 
 
 @pytest.mark.live_only
@@ -783,6 +858,9 @@ async def test_download_lab_topology(main_mcp_client: Client[FastMCPTransport], 
     yaml_content = download_result.content[0].text
     assert isinstance(yaml_content, str)
     assert len(yaml_content) > 0
+    parsed = yaml.safe_load(yaml_content)
+    assert parsed["annotations"][0]["border_style"] == "dashed"
+    assert parsed["smart_annotations"][0]["border_style"] == "dotted"
 
 
 @pytest.mark.mock_only

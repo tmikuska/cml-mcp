@@ -38,9 +38,10 @@ from fastmcp.exceptions import ToolError
 from cml_mcp.cml.simple_webserver.schemas.common import UUID4_REG, UserName, UUID4Type
 from cml_mcp.cml.simple_webserver.schemas.labs import Lab, LabAssociations, LabNotes, LabRequest, LabTitle
 from cml_mcp.cml.simple_webserver.schemas.topologies import Topology
+from cml_mcp.border_style import normalize_topology_border_styles, wire_topology_border_styles
 from cml_mcp.cml_client import CMLClient
 from cml_mcp.tools.dependencies import elicit_confirmation, get_cml_client_dep
-from cml_mcp.tools.model_helpers import build_payload, field_from, lenient_construct
+from cml_mcp.tools.model_helpers import build_payload, field_from, lenient_construct, parse_json_arg
 
 logger = logging.getLogger("cml-mcp.tools.labs")
 
@@ -98,7 +99,12 @@ async def download_lab_file(lab_id: UUID4Type, client: CMLClient) -> str:
         str: The topology as a YAML string.
     """
     topo_data = await client.get(f"/labs/{lab_id}/download", is_binary=True)
-    return topo_data.decode("utf-8")
+    text = topo_data.decode("utf-8")
+    yaml_data = yaml.safe_load(text)
+    if isinstance(yaml_data, dict):
+        normalize_topology_border_styles(yaml_data)
+        return yaml.dump(yaml_data, sort_keys=False)
+    return text
 
 
 async def create_full_topology_from_obj(topology: Topology, client: CMLClient) -> UUID4Type:
@@ -106,13 +112,15 @@ async def create_full_topology_from_obj(topology: Topology, client: CMLClient) -
     Create complete lab from Topology object.
 
     Args:
-        topology (Topology): The topology object.
+        topology (Topology): The topology object (canonical MCP border_style values).
         client (CMLClient): The CML client instance.
 
     Returns:
         UUID4Type: The lab UUID.
     """
-    resp = await client.post("/import", data=topology.model_dump(mode="json", exclude_unset=True, exclude_none=True))
+    payload = topology.model_dump(mode="json", exclude_unset=True, exclude_none=True)
+    wire_topology_border_styles(payload)
+    resp = await client.post("/import", data=payload)
     return UUID4Type(resp["id"])
 
 
@@ -332,7 +340,7 @@ def register_tools(mcp):  # noqa: C901
         client = get_cml_client_dep()
         try:
             if isinstance(topology, (dict, str)):
-                topology = lenient_construct(Topology, topology)
+                topology = lenient_construct(Topology, parse_json_arg(topology))
             return await create_full_topology_from_obj(topology, client)
         except httpx.HTTPStatusError as e:
             raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")

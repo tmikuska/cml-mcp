@@ -294,6 +294,32 @@ if USE_MOCKS:
 
 
 @pytest.fixture()
+async def live_cml_api_client():
+    """Authenticated CML REST client for live-only API-level checks."""
+    if USE_MOCKS:
+        pytest.skip("Live CML API client requires USE_MOCKS=false")
+
+    for var in ("CML_URL", "CML_USERNAME", "CML_PASSWORD"):
+        if not os.getenv(var):
+            pytest.skip(f"{var} is not set")
+
+    from cml_mcp.cml_client import CMLClient
+
+    verify_ssl = os.getenv("CML_VERIFY_SSL", "false").lower() == "true"
+    client = CMLClient(
+        host=os.environ["CML_URL"],
+        username=os.environ["CML_USERNAME"],
+        password=os.environ["CML_PASSWORD"],
+        verify_ssl=verify_ssl,
+    )
+    await client.login()
+    try:
+        yield client
+    finally:
+        await client.close()
+
+
+@pytest.fixture()
 async def main_mcp_client():
     """
     Main MCP client fixture for testing.
