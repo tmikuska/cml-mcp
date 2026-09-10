@@ -44,7 +44,7 @@ The easiest way to get started is using `uvx` with Claude Desktop (or other MCP-
           "type": "stdio",                                                          
           "command": "uvx",
           "args": [                                                                 
-            "cml-mcp[pyats]"                                                        
+            "cml-mcp"                                                        
           ],                                                                        
           "env": {
             "CML_URL": "{CML_URL}",                           
