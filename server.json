@@ -41,7 +41,7 @@
           "name": "CML_PASSWORD"
         },
         {
-          "description": "Long-lived CML API token (personal access token) used instead of CML_USERNAME/CML_PASSWORD. Mutually exclusive with them; required if they are not set. Can be replaced at runtime via the set_cml_token tool without restarting. Requires CML 2.12 or later.",
+          "description": "Long-lived CML API token (personal access token) used instead of CML_USERNAME/CML_PASSWORD. Mutually exclusive with them; required if they are not set. Can be replaced at runtime via the set_cml_token tool without restarting.",
           "isRequired": false,
           "format": "string",
           "isSecret": true,

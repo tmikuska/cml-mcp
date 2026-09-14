@@ -52,8 +52,8 @@ class Settings(BaseSettings):
         default=None,
         description=(
             "Long-lived CML API token (personal access token) used instead of CML_USERNAME/CML_PASSWORD. "
-            "Mutually exclusive with CML_USERNAME/CML_PASSWORD. Requires CML 2.12 or later. Can be replaced "
-            "at runtime via the 'set_cml_token' MCP tool without restarting the server."
+            "Mutually exclusive with CML_USERNAME/CML_PASSWORD. Can be replaced at runtime via the "
+            "'set_cml_token' MCP tool without restarting the server."
         ),
     )
     cml_verify_ssl: bool = Field(

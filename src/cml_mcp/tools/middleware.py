@@ -42,7 +42,7 @@ from mcp.shared.exceptions import McpError
 from mcp.types import ErrorData
 from pydantic import AnyHttpUrl, TypeAdapter, ValidationError
 
-from cml_mcp.cml_client import CMLClient, CMLFeatureUnsupportedError
+from cml_mcp.cml_client import CMLClient
 from cml_mcp.settings import settings
 
 logger = logging.getLogger("cml-mcp.middleware")
@@ -414,9 +414,6 @@ class CustomHttpRequestMiddleware(Middleware):
             )
             try:
                 await request_client.login()
-            except CMLFeatureUnsupportedError as e:
-                logger.warning("Authentication rejected: %s", e)
-                raise McpError(ErrorData(message=str(e), code=-31005))
             except Exception as e:
                 logger.warning("Authentication failed: %s", e)
                 raise McpError(ErrorData(message=f"Unauthorized: {str(e)}", code=-31002))

@@ -30,7 +30,7 @@ import logging
 
 from fastmcp.exceptions import ToolError
 
-from cml_mcp.cml_client import CMLFeatureUnsupportedError, CMLTokenExpiredError
+from cml_mcp.cml_client import CMLTokenExpiredError
 from cml_mcp.settings import settings
 from cml_mcp.tools.dependencies import get_cml_client_dep
 
@@ -71,7 +71,7 @@ def register_tools(mcp):
         client = get_cml_client_dep()
         try:
             await client.set_token(token)
-        except (CMLTokenExpiredError, CMLFeatureUnsupportedError) as e:
+        except CMLTokenExpiredError as e:
             raise ToolError(str(e))
         except Exception as e:
             logger.exception("Error setting new CML API token")

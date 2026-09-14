@@ -47,11 +47,10 @@ class CMLVersion(StrEnum):
     api_versioning schemas (used there to annotate OpenAPI routes with
     ``x-cml-introduced``/``x-cml-changed``). Here each member instead acts as a
     minimum-version requirement that can be compared against the connected
-    controller's parsed version, e.g. ``CMLVersion.V2_12.supported_by(version)``.
+    controller's parsed version, e.g. ``CMLVersion.V2_11.supported_by(version)``.
     """
 
     V2_11 = "2.11"
-    V2_12 = "2.12"
 
     def as_tuple(self) -> tuple[int, int, int]:
         major, minor = (int(part) for part in self.value.split("."))
@@ -66,11 +65,6 @@ class CMLVersion(StrEnum):
 # older than this do not have the endpoint at all, so CLI execution falls back
 # to a direct pyATS/SSH connection via the optional cml-mcp[pyats] extra.
 _MIN_NATIVE_CLI_VERSION = CMLVersion.V2_11
-
-# CML_API_TOKEN / personal-access-token authentication was added in CML 2.12.
-# Older controllers don't support it, so we fail fast with a clear message
-# rather than a confusing auth error.
-_MIN_API_TOKEN_VERSION = CMLVersion.V2_12
 
 
 def _strip_controller_version(version: str) -> tuple[int, int, int] | None:
@@ -113,13 +107,6 @@ class CMLTokenExpiredError(Exception):
     that converts the exception to a ``ToolError`` with ``str(e)`` as the message, so
     raising this with a clear, actionable message here is sufficient to surface a
     helpful error to the calling LLM/agent without touching every tool module.
-    """
-
-
-class CMLFeatureUnsupportedError(Exception):
-    """Raised when a requested feature (currently: CML API token authentication)
-    requires a newer CML controller version than the connected server reports, or when
-    the controller version cannot be determined to check.
     """
 
 
@@ -168,8 +155,6 @@ class CMLClient(object):
         self.admin = None
         self.needs_reauth = False
         self._supports_native_cli: bool | None = None
-        self.current_connected_cml_version: tuple[int, int, int] | None = None
-        self._version_fetch_attempted = False
 
         # HTTP-mode-only bookkeeping (always None in stdio mode): the cml_client_cache
         # key this instance is currently stored under, and the non-secret suffix
@@ -207,31 +192,6 @@ class CMLClient(object):
         resp = await self.client.get(url)
         resp.raise_for_status()
 
-    async def _fetch_connected_version(self) -> None:
-        """
-        Fetch and cache the connected CML controller's version via the unauthenticated
-        GET /system_information endpoint (same call virl2_client's own
-        check_controller_version() makes). Called once, as early as possible (the
-        first time login() runs), and cached in self.current_connected_cml_version for
-        the lifetime of this client, since the controller version cannot change
-        mid-session (same assumption as supports_native_cli()).
-
-        Failures here are non-fatal: self.current_connected_cml_version simply stays
-        None, and version-gated features (e.g. CML API token auth) fail with a clear
-        error only when they are actually used.
-        """
-        if self._version_fetch_attempted:
-            return
-        self._version_fetch_attempted = True
-        try:
-            resp = await self.client.get(f"{self.base_url}/api/v0/system_information")
-            resp.raise_for_status()
-            version_str = resp.json().get("version", "")
-            self.current_connected_cml_version = _strip_controller_version(version_str)
-        except Exception:
-            logger.exception("Failed to fetch the connected CML controller's version")
-            self.current_connected_cml_version = None
-
     async def _resolve_identity_from_token(self) -> None:
         """
         Best-effort resolution of self.username from the current bearer token when no
@@ -265,19 +225,7 @@ class CMLClient(object):
         rejected, CMLTokenExpiredError is raised with an actionable message instead of
         an opaque 401. Otherwise, the traditional username/password login flow is used.
         """
-        await self._fetch_connected_version()
-
         if self.api_token:
-            if not _MIN_API_TOKEN_VERSION.supported_by(self.current_connected_cml_version):
-                connected_str = (
-                    ".".join(str(part) for part in self.current_connected_cml_version)
-                    if self.current_connected_cml_version is not None
-                    else "an unknown version (could not be determined)"
-                )
-                raise CMLFeatureUnsupportedError(
-                    f"CML API token authentication requires CML {_MIN_API_TOKEN_VERSION.value} or later; this "
-                    f"server is running {connected_str}. Use CML_USERNAME/CML_PASSWORD instead."
-                )
             self.token = self.api_token
             self.needs_reauth = False
             try:
@@ -324,9 +272,7 @@ class CMLClient(object):
 
         Lets a caller (e.g. the 'set_cml_token' MCP tool) recover from a mid-session or
         post-restart token expiry by supplying a fresh long-lived CML API token.
-        Raises CMLTokenExpiredError if the new token itself is rejected by the server, or
-        CMLFeatureUnsupportedError if the connected CML controller is older than the
-        minimum version that supports API token authentication (see _MIN_API_TOKEN_VERSION).
+        Raises CMLTokenExpiredError if the new token itself is rejected by the server.
         """
         self.api_token = new_token
         self.token = None

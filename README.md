@@ -60,7 +60,7 @@ The easiest way to get started is using `uvx` with Claude Desktop (or other MCP-
 **Important:** Replace the placeholder values with your actual CML server details:
 
 - `CML_URL`: Your CML server address (e.g., `https://cml.example.com` or `https://10.10.20.50`)
-- `CML_USERNAME` and `CML_PASSWORD`: Your CML login credentials. Alternatively, set `CML_API_TOKEN` to a long-lived CML API token (personal access token) instead (requires CML 2.12+) -- see [INSTALLATION.md](https://github.com/xorrkaz/cml-mcp/blob/main/INSTALLATION.md) for details. Configure exactly one of the two methods.
+- `CML_USERNAME` and `CML_PASSWORD`: Your CML login credentials. Alternatively, set `CML_API_TOKEN` to a long-lived CML API token (personal access token) instead -- see [INSTALLATION.md](https://github.com/xorrkaz/cml-mcp/blob/main/INSTALLATION.md) for details. Configure exactly one of the two methods.
 - `CML_VERIFY_SSL`: TLS certificate verification now defaults to `"true"`. CML ships with a self-signed certificate out of the box, so **most users need to set this to `"false"`** (as shown above). Leave it at `"true"` only if you have installed a CA-signed certificate on your CML server (or point `CA_BUNDLE` at a file containing your self-signed certificate).
 
 > [!TIP]
