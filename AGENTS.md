@@ -49,6 +49,7 @@ Each module exposes a `register_tools(mcp)` function called from `server.py`.
 | `users_groups.py` | get_cml_users/groups, create/delete_cml_user/group |
 | `system.py` | get_cml_information, get_cml_status, get_cml_statistics, get_cml_licensing_details |
 | `cli.py` | send_cli_command (native `/cli` on 2.11+; optional pyATS fallback), get_console_log |
+| `auth.py` | set_cml_token |
 
 ## Key Conventions
 
@@ -57,17 +58,19 @@ Each module exposes a `register_tools(mcp)` function called from `server.py`.
 - **Admin-only tools** — `create_cml_user`, `delete_cml_user`, `create_cml_group`, `delete_cml_group` check `client.is_admin()` at runtime and raise if the caller is not an admin.
 - **CLI commands** — `send_cli_command` uses the CML native `POST /labs/{id}/nodes/{id}/cli` API on controllers 2.11+. On older servers, install `cml-mcp[pyats]` for a direct pyATS/SSH fallback. `config_command=true` enters configuration mode; omit `configure terminal` / `end`. `label` is the node label, not the UUID. Both `send_cli_command` and `get_console_log` accept an optional `console` integer (default `0`) to select which serial port to use; Docker-based nodes often expose a second console on index `1`.
 - **Packet capture data** — `get_packet_capture_data` returns a base64-encoded PCAP binary. Decode and save as `.pcap` for Wireshark/tcpdump.
+- **Long-lived API token auth** — `CML_API_TOKEN` (stdio) / `X-Authorization: Bearer <token>` (HTTP) authenticates with a long-lived CML personal-access token instead of username/password; see `cml_client.py`'s `CMLClient.login()`/`check_authentication()` and `CMLTokenExpiredError`. Mutually exclusive with `CML_USERNAME`/`CML_PASSWORD` in stdio mode (validated at startup in `settings.py`). When the token expires or is revoked mid-session or after a restart, `CMLTokenExpiredError` propagates through each tool's existing generic `except Exception` handler as a `ToolError` with an actionable message — no per-tool changes needed. The `set_cml_token` tool (`tools/auth.py`) lets a caller supply a fresh token at runtime via `CMLClient.set_token()` without restarting the server or reconnecting.
 
 ## Environment Variables
 
 | Variable | Required | Description |
 |---|---|---|
 | `CML_URL` | Yes | CML server URL |
-| `CML_USERNAME` | stdio: yes / HTTP: optional | CML login username. **HTTP mode:** ignored unless `CML_MCP_ALLOW_UNAUTHENTICATED=true` is also set, in which case requests with no `X-Authorization` header that target the default `CML_URL` fall back to these credentials (requests supplying their own `X-CML-Server-URL` never do). Leave unset unless you specifically want a default identity. |
-| `CML_PASSWORD` | stdio: yes / HTTP: optional | CML login password. Same HTTP-mode caveat as `CML_USERNAME`. |
+| `CML_USERNAME` | stdio: yes, unless `CML_API_TOKEN` is set / HTTP: optional | CML login username. **stdio mode:** mutually exclusive with `CML_API_TOKEN`; must be set together with `CML_PASSWORD`. **HTTP mode:** ignored unless `CML_MCP_ALLOW_UNAUTHENTICATED=true` is also set, in which case requests with no `X-Authorization` header that target the default `CML_URL` fall back to these credentials (requests supplying their own `X-CML-Server-URL` never do). Leave unset unless you specifically want a default identity. |
+| `CML_PASSWORD` | stdio: yes, unless `CML_API_TOKEN` is set / HTTP: optional | CML login password. Same HTTP-mode caveat as `CML_USERNAME`. |
+| `CML_API_TOKEN` | stdio: yes, unless `CML_USERNAME`/`CML_PASSWORD` are set / HTTP: optional | Long-lived CML API token (personal access token) used instead of username/password. **stdio mode:** mutually exclusive with `CML_USERNAME`/`CML_PASSWORD` — the server refuses to start if both, or neither, are set. **HTTP mode:** same fallback-identity caveat as `CML_USERNAME`/`CML_PASSWORD`; per-request token auth normally goes through `X-Authorization: Bearer <token>` instead. Can be replaced at runtime via the `set_cml_token` tool without restarting. |
 | `CML_VERIFY_SSL` | No | TLS certificate verification. **Defaults to `true`.** CML ships with a self-signed certificate, so most users must set `false`. **HTTP mode:** authoritative for requests that use the default `CML_URL`; the `X-CML-Verify-SSL` header can only adjust verification for requests that supply their own `X-CML-Server-URL`. |
 | `CML_MCP_TRANSPORT` | No | `http` for HTTP mode (default: `stdio`) |
-| `CML_MCP_ALLOW_UNAUTHENTICATED` | No | HTTP mode only. When `true`, requests without an `X-Authorization` header fall back to `CML_USERNAME`/`CML_PASSWORD`. Default `false` (such requests are rejected). The fallback applies **only** to the statically configured `CML_URL` — requests that supply their own `X-CML-Server-URL` never receive these credentials, preventing exfiltration of the configured identity to a client-chosen server. Lets any client reaching the port act as the configured identity — opt in only for trusted single-tenant deployments. Server logs a warning at startup when active. |
+| `CML_MCP_ALLOW_UNAUTHENTICATED` | No | HTTP mode only. When `true`, requests without an `X-Authorization` header fall back to `CML_USERNAME`/`CML_PASSWORD` or `CML_API_TOKEN`. Default `false` (such requests are rejected). The fallback applies **only** to the statically configured `CML_URL` — requests that supply their own `X-CML-Server-URL` never receive these credentials, preventing exfiltration of the configured identity to a client-chosen server. Lets any client reaching the port act as the configured identity — opt in only for trusted single-tenant deployments. Server logs a warning at startup when active. |
 | `CML_SESSION_TTL` | No | Idle TTL in seconds for cached HTTP sessions (default: `3600`) |
 | `PYATS_USERNAME` | No | Device login username |
 | `PYATS_PASSWORD` | No | Device login password |

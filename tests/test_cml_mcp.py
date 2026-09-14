@@ -106,7 +106,7 @@ async def _is_ping_reachable(
 async def test_list_tools(main_mcp_client: Client[FastMCPTransport]):
     list_tools = await main_mcp_client.list_tools()
 
-    assert len(list_tools) == snapshot(51)
+    assert len(list_tools) == snapshot(52)
 
 
 async def test_get_cml_labs(main_mcp_client: Client[FastMCPTransport], created_lab: UUID4Type):

@@ -48,6 +48,14 @@ class Settings(BaseSettings):
     cml_url: AnyHttpUrl | None = Field(default=None, description="URL of the Cisco Modeling Labs server")
     cml_username: str | None = Field(default=None, description="Username for CML server authentication")
     cml_password: str | None = Field(default=None, description="Password for CML server authentication")
+    cml_api_token: str | None = Field(
+        default=None,
+        description=(
+            "Long-lived CML API token (personal access token) used instead of CML_USERNAME/CML_PASSWORD. "
+            "Mutually exclusive with CML_USERNAME/CML_PASSWORD. Can be replaced at runtime via the "
+            "'set_cml_token' MCP tool without restarting the server."
+        ),
+    )
     cml_verify_ssl: bool = Field(
         default=True,
         description="Whether to verify the CML server's SSL certificate",
@@ -94,5 +102,16 @@ class Settings(BaseSettings):
 
 settings = Settings()
 if settings.cml_mcp_transport == TransportEnum.STDIO:
-    if not settings.cml_url or not settings.cml_username or not settings.cml_password:
-        raise ValueError("CML_URL, CML_USERNAME, and CML_PASSWORD must be set when using stdio transport")
+    if not settings.cml_url:
+        raise ValueError("CML_URL must be set when using stdio transport")
+    _has_userpass = bool(settings.cml_username or settings.cml_password)
+    _has_token = bool(settings.cml_api_token)
+    if _has_userpass and _has_token:
+        raise ValueError(
+            "CML_API_TOKEN cannot be combined with CML_USERNAME/CML_PASSWORD. Configure exactly one "
+            "authentication method for stdio transport."
+        )
+    if not _has_userpass and not _has_token:
+        raise ValueError("Either CML_API_TOKEN, or both CML_USERNAME and CML_PASSWORD, must be set when using stdio transport")
+    if _has_userpass and not (settings.cml_username and settings.cml_password):
+        raise ValueError("CML_USERNAME and CML_PASSWORD must both be set together when not using CML_API_TOKEN")
