@@ -47,6 +47,7 @@ if settings.cml_mcp_transport == "stdio":
         str(settings.cml_url),
         settings.cml_username,
         settings.cml_password,
+        api_token=settings.cml_api_token,
         transport=str(settings.cml_mcp_transport),
         verify_ssl=settings.cml_verify_ssl,
     )

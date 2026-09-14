@@ -27,18 +27,25 @@
           "name": "CML_URL"
         },
         {
-          "description": "Username for CML authentication",
-          "isRequired": true,
+          "description": "Username for CML authentication (mutually exclusive with CML_API_TOKEN; required together with CML_PASSWORD if CML_API_TOKEN is not set)",
+          "isRequired": false,
           "format": "string",
           "isSecret": false,
           "name": "CML_USERNAME"
         },
         {
-          "description": "Password for CML authentication",
-          "isRequired": true,
+          "description": "Password for CML authentication (mutually exclusive with CML_API_TOKEN; required together with CML_USERNAME if CML_API_TOKEN is not set)",
+          "isRequired": false,
           "format": "string",
           "isSecret": true,
           "name": "CML_PASSWORD"
+        },
+        {
+          "description": "Long-lived CML API token (personal access token) used instead of CML_USERNAME/CML_PASSWORD. Mutually exclusive with them; required if they are not set. Can be replaced at runtime via the set_cml_token tool without restarting. Requires CML 2.12 or later.",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": true,
+          "name": "CML_API_TOKEN"
         },
         {
           "description": "Username for authentication to devices running in CML",

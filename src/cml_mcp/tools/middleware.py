@@ -42,7 +42,7 @@ from mcp.shared.exceptions import McpError
 from mcp.types import ErrorData
 from pydantic import AnyHttpUrl, TypeAdapter, ValidationError
 
-from cml_mcp.cml_client import CMLClient
+from cml_mcp.cml_client import CMLClient, CMLFeatureUnsupportedError
 from cml_mcp.settings import settings
 
 logger = logging.getLogger("cml-mcp.middleware")
@@ -52,6 +52,18 @@ _url_adapter = TypeAdapter(AnyHttpUrl)
 
 # ACL data
 acl_data: dict[str, Any] = {}
+
+
+def token_cache_key(api_token: str, cache_key_suffix: str) -> str:
+    """
+    Build the cml_client_cache key for a token-authenticated client.
+
+    Shared between on_request() (initial caching) and the set_cml_token tool
+    (re-keying after set_token() rotates a cached client's credentials in place),
+    so both sides always agree on the exact key format.
+    """
+    token_hash = hashlib.sha256(api_token.encode()).hexdigest()
+    return f"token:{token_hash}:{cache_key_suffix}"
 
 
 def _validate_acl_data(raw_acl_data: dict | None) -> dict | None:
@@ -273,10 +285,20 @@ class CustomHttpRequestMiddleware(Middleware):
             # to the statically configured CML_URL: a request that supplies its own
             # X-CML-Server-URL must authenticate, so the configured credentials can never be
             # forwarded to (and harvested by) a client-chosen server, even an allow-listed one.
-            if settings.cml_mcp_allow_unauthenticated and not client_provided_url and settings.cml_username and settings.cml_password:
+            if (
+                settings.cml_mcp_allow_unauthenticated
+                and not client_provided_url
+                and ((settings.cml_username and settings.cml_password) or settings.cml_api_token)
+            ):
                 logger.debug("Using default CML credentials from settings (unauthenticated mode enabled)")
-                username = settings.cml_username
-                password = settings.cml_password
+                if settings.cml_api_token:
+                    username = None
+                    password = None
+                    api_token = settings.cml_api_token
+                else:
+                    username = settings.cml_username
+                    password = settings.cml_password
+                    api_token = None
             else:
                 logger.warning("Request rejected: missing or invalid X-Authorization header")
                 raise McpError(
@@ -287,25 +309,42 @@ class CustomHttpRequestMiddleware(Middleware):
                 )
         else:
             parts = auth_header.split(None, 1)
-            if len(parts) != 2 or parts[0].lower() != "basic":
+            scheme = parts[0].lower() if parts else ""
+            if len(parts) != 2 or scheme not in ("basic", "bearer"):
                 logger.warning("Request rejected: malformed X-Authorization header")
                 raise McpError(
                     ErrorData(
-                        message="Invalid X-Authorization header format. Expected 'Basic <credentials>'",
+                        message="Invalid X-Authorization header format. Expected 'Basic <credentials>' or 'Bearer <token>'",
                         code=-31001,
                     )
                 )
-            try:
-                decoded = base64.b64decode(parts[1]).decode("utf-8")
-                username, password = decoded.split(":", 1)
-            except Exception:
-                logger.warning("Request rejected: failed to decode X-Authorization credentials")
-                raise McpError(
-                    ErrorData(
-                        message="Failed to decode Basic authentication credentials",
-                        code=-31002,
+            if scheme == "bearer":
+                # Long-lived CML API token auth: the token is used directly as the bearer
+                # credential, no username/password login round trip is needed.
+                api_token = parts[1].strip()
+                username = None
+                password = None
+                if not api_token:
+                    logger.warning("Request rejected: empty Bearer token in X-Authorization header")
+                    raise McpError(
+                        ErrorData(
+                            message="Invalid X-Authorization header: Bearer token must not be empty",
+                            code=-31001,
+                        )
                     )
-                )
+            else:
+                try:
+                    decoded = base64.b64decode(parts[1]).decode("utf-8")
+                    username, password = decoded.split(":", 1)
+                except Exception:
+                    logger.warning("Request rejected: failed to decode X-Authorization credentials")
+                    raise McpError(
+                        ErrorData(
+                            message="Failed to decode Basic authentication credentials",
+                            code=-31002,
+                        )
+                    )
+                api_token = None
         pyats_header = headers.get("x-pyats-authorization")
         if pyats_header and " " in pyats_header:
             pyats_parts = pyats_header.split(None, 1)
@@ -355,19 +394,38 @@ class CustomHttpRequestMiddleware(Middleware):
                     )
 
         # Look for the user's client in the cache.
-        # Hash the password so it never appears in log output or dict keys.
-        pwd_hash = hashlib.sha256(password.encode()).hexdigest()
-        client_cache_key = f"{username}:{pwd_hash}:{cml_url}:{verify_ssl}"
+        # Hash the secret (password or token) so it never appears in log output or dict keys.
+        cache_key_suffix = f"{cml_url}:{verify_ssl}"
+        if api_token:
+            client_cache_key = token_cache_key(api_token, cache_key_suffix)
+        else:
+            pwd_hash = hashlib.sha256(password.encode()).hexdigest()
+            client_cache_key = f"userpass:{username}:{pwd_hash}:{cache_key_suffix}"
         request_client = await cml_client_cache.get(client_cache_key)
         if not request_client:
             # Create a new client for this request.
-            request_client = CMLClient(cml_url, username, password, transport="http", verify_ssl=verify_ssl)
+            request_client = CMLClient(
+                cml_url,
+                username,
+                password,
+                api_token=api_token,
+                transport="http",
+                verify_ssl=verify_ssl,
+            )
             try:
                 await request_client.login()
+            except CMLFeatureUnsupportedError as e:
+                logger.warning("Authentication rejected: %s", e)
+                raise McpError(ErrorData(message=str(e), code=-31005))
             except Exception as e:
                 logger.warning("Authentication failed: %s", e)
                 raise McpError(ErrorData(message=f"Unauthorized: {str(e)}", code=-31002))
 
+            # Remember the key/suffix this client is cached under so set_cml_token can
+            # re-key it (rather than mutate it in place under its original key) after
+            # rotating its credentials -- see ThreadSafeCache.rekey().
+            request_client._cache_key = client_cache_key
+            request_client._cache_key_suffix = cache_key_suffix
             await cml_client_cache.set(client_cache_key, request_client)
 
         # Store the client in context variable for this request

@@ -38,6 +38,7 @@ from cml_mcp.settings import settings
 from cml_mcp.tools import dependencies  # noqa: F401 - imported for side effects (global client init)
 from cml_mcp.tools import (
     annotations,
+    auth,
     cli,
     interfaces,
     labs,
@@ -98,4 +99,5 @@ links.register_tools(server_mcp)
 annotations.register_tools(server_mcp)
 pcap.register_tools(server_mcp)
 cli.register_tools(server_mcp)
+auth.register_tools(server_mcp)
 logger.info("All tools registered successfully")

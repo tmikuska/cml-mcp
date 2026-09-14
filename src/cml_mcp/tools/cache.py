@@ -95,6 +95,31 @@ class ThreadSafeCache:
             self._cache.clear()
         await asyncio.gather(*(e.value.close() for e in entries))
 
+    async def rekey(self, old_key: str, new_key: str) -> None:
+        """Move a cache entry from old_key to new_key without closing the moved client.
+
+        Used after a cached client's credentials are rotated in place (e.g.
+        CMLClient.set_token() via the set_cml_token tool), so the client becomes
+        reachable only under a key matching its *new* credentials -- a request that
+        still presents the stale old credentials will then miss the cache and be
+        forced to authenticate from scratch, rather than transparently reusing the
+        rotated session.
+
+        If new_key already holds a *different* entry, that displaced entry is closed
+        (same behavior as set()). No-ops if old_key is not present (e.g. it was
+        already evicted or re-keyed concurrently) or if old_key == new_key.
+        """
+        if old_key == new_key:
+            return
+        async with self._lock:
+            entry = self._cache.pop(old_key, None)
+            if entry is None:
+                return
+            displaced = self._cache.get(new_key)
+            self._cache[new_key] = entry
+        if displaced and displaced.value is not entry.value:
+            await displaced.value.close()
+
     async def invalidate(self, key: str) -> None:
         """Remove specific cache entry and close its session.
 
