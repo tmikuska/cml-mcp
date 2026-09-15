@@ -102,7 +102,12 @@ class CMLClient(object):
 
         self.base_url = host.rstrip("/")
         self.api_base = f"{self.base_url}/api/v0"
-        self.client = httpx.AsyncClient(verify=verify_ssl, timeout=API_TIMEOUT)
+        # follow_redirects is explicitly disabled (rather than relying on httpx's
+        # current default of False) so a future httpx version bump can't silently
+        # start following redirects and let a malicious/compromised CML endpoint
+        # redirect the login POST (which carries the user's credentials) to an
+        # arbitrary, non-allow-listed host.
+        self.client = httpx.AsyncClient(verify=verify_ssl, timeout=API_TIMEOUT, follow_redirects=False)
         self.client.headers.update({"X-CML-CLIENT": MCP_CLIENT_IDENTIFIER})
 
     @property

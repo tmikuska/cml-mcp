@@ -168,8 +168,14 @@ class CustomHttpRequestMiddleware(Middleware):
                 )
         if url_pattern:
             # Match against a canonical origin (no userinfo, path, or query).
+            # re.fullmatch (not re.match) is required: re.match only anchors the
+            # start of the string, so an operator pattern that omits a trailing
+            # "$" (e.g. "^https://cml\\.example\\.com") would still match a
+            # suffix-extended host such as "https://cml.example.com.attacker.tld:443"
+            # or a userinfo-prefixed host, letting a remote caller redirect the
+            # credential POST to an attacker-controlled origin.
             canonical = f"{target.scheme}://{target.host}:{target.port}"
-            if not re.match(url_pattern, canonical):
+            if not re.fullmatch(url_pattern, canonical):
                 raise McpError(
                     ErrorData(
                         message=f"CML server URL '{url}' does not match the required pattern",

@@ -12,7 +12,10 @@ FROM python:3.13-slim-bookworm
 # Set Python unbuffered mode
 ENV PYTHONUNBUFFERED=1
 
-ENV CML_URL=https://cml.host.internal
+# CML_URL is intentionally NOT given a default here. A baked-in hostname like
+# "cml.host.internal" is a name an attacker could squat on a customer LAN,
+# silently redirecting credential POSTs to a host they control. Operators must
+# supply CML_URL explicitly (e.g. via `-e CML_URL=...` or an env file).
 ENV CML_MCP_TRANSPORT=stdio
 ENV DEBUG=false
 # This should not need to change.  Just bind mount it if needed.

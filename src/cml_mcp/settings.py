@@ -70,7 +70,13 @@ class Settings(BaseSettings):
     )
     cml_url_pattern: str | None = Field(
         default=None,
-        description="Regex pattern that the CML server URL must match when transport is HTTP (e.g., '^https://cml\\.example\\.com').",
+        description=(
+            "Regex pattern that the CML server URL must fully match (via re.fullmatch) against its canonical"
+            " 'scheme://host:port' origin when transport is HTTP (e.g., '^https://cml\\.example\\.com:443$')."
+            " The port is always filled in with the scheme default (80/443) when omitted by the client, so include"
+            " it in the pattern. Always anchor with both '^' and a trailing '$'; an unanchored pattern can be"
+            " satisfied by a suffix-extended or userinfo-prefixed host."
+        ),
     )
     cml_mcp_acl_file: str | None = Field(
         default=None,
@@ -96,3 +102,10 @@ settings = Settings()
 if settings.cml_mcp_transport == TransportEnum.STDIO:
     if not settings.cml_url or not settings.cml_username or not settings.cml_password:
         raise ValueError("CML_URL, CML_USERNAME, and CML_PASSWORD must be set when using stdio transport")
+elif settings.cml_mcp_transport == TransportEnum.HTTP:
+    # Fail fast at startup rather than lazily on the first request that supplies an
+    # X-CML-Server-URL header. Without at least one of these, the middleware has no
+    # way to constrain which host a client-supplied URL can point to, which would let
+    # a remote caller redirect credential POSTs to an attacker-controlled server.
+    if not settings.cml_url and not settings.cml_allowed_urls and not settings.cml_url_pattern:
+        raise ValueError("At least one of CML_URL, CML_ALLOWED_URLS, or CML_URL_PATTERN must be set when using HTTP transport")
