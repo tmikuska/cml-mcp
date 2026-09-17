@@ -51,13 +51,79 @@ class CacheEntry:
 class ThreadSafeCache:
     """Thread-safe cache with TTL support."""
 
-    def __init__(self, ttl: int = 3600):
+    def __init__(self, ttl: int = 3600, sweep_interval: int | None = None):
         self._cache: Dict[str, CacheEntry] = {}
         self._lock = Lock()
         self._ttl = ttl
+        # How often the background sweep (see _sweep_loop) walks the whole cache
+        # evicting expired entries. Defaults to the TTL itself, capped at 300s so a
+        # very large CML_SESSION_TTL doesn't leave stale entries (and their open
+        # httpx.AsyncClient connection pools) sitting around for hours before the
+        # first sweep.
+        self._sweep_interval = sweep_interval if sweep_interval is not None else min(ttl, 300)
+        self._sweep_task: asyncio.Task | None = None
+
+    def _ensure_sweeper_started(self) -> None:
+        """Lazily start the background eviction sweep on first cache access.
+
+        get() only evicts an expired entry when that same key is looked up again, so a
+        client that is cached once and never looked up again (e.g. a one-off token used
+        for a single burst of requests) would otherwise stay in memory -- along with its
+        open httpx.AsyncClient connection pool -- for the entire life of the process.
+        This periodic sweep instead walks the whole cache every _sweep_interval seconds
+        and evicts anything past its TTL regardless of whether it is ever looked up
+        again, bounding memory use by "recently active unique credentials" rather than
+        "every credential ever seen".
+
+        Started lazily here (not in __init__) because ThreadSafeCache is constructed at
+        import time in tools/dependencies.py, before any asyncio event loop is running.
+        """
+        if self._sweep_task is not None and not self._sweep_task.done():
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop yet (e.g. called from sync code or before the server
+            # event loop starts); the next get()/set() call will retry.
+            return
+        self._sweep_task = loop.create_task(self._sweep_loop())
+
+    async def _sweep_loop(self) -> None:
+        """Evict expired entries every _sweep_interval seconds until cancelled."""
+        try:
+            while True:
+                await asyncio.sleep(self._sweep_interval)
+                await self._sweep_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Background cache sweep failed; sweeping will not resume")
+
+    async def _sweep_once(self) -> None:
+        """Evict every currently-expired entry in a single pass."""
+        async with self._lock:
+            expired_keys = [key for key, entry in self._cache.items() if entry.is_expired(self._ttl)]
+            expired_clients = [self._cache.pop(key).value for key in expired_keys]
+        if expired_clients:
+            logger.debug(
+                "Background sweep evicting %d expired cache entr%s", len(expired_clients), "y" if len(expired_clients) == 1 else "ies"
+            )
+            await asyncio.gather(*(client.close() for client in expired_clients))
+
+    async def stop_sweeper(self) -> None:
+        """Cancel the background sweep task, if running. Safe to call multiple times."""
+        if self._sweep_task is None:
+            return
+        self._sweep_task.cancel()
+        try:
+            await self._sweep_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        self._sweep_task = None
 
     async def get(self, key: str) -> Optional[CMLClient]:
         """Retrieve value from cache if not expired."""
+        self._ensure_sweeper_started()
         expired_client = None
         async with self._lock:
             entry = self._cache.get(key)
@@ -74,6 +140,7 @@ class ThreadSafeCache:
 
     async def set(self, key: str, value: CMLClient) -> None:
         """Store value in cache with current timestamp, closing any displaced entry."""
+        self._ensure_sweeper_started()
         async with self._lock:
             old_entry = self._cache.get(key)
             self._cache[key] = CacheEntry(value=value)
