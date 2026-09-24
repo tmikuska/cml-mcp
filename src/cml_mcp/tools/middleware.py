@@ -48,6 +48,7 @@ from pydantic import AnyHttpUrl, TypeAdapter, ValidationError
 
 from cml_mcp.cml_client import CMLClient
 from cml_mcp.settings import settings
+from cml_mcp.tools import dependencies
 from cml_mcp.tools.cache import _redact_key
 
 logger = logging.getLogger("cml-mcp.middleware")
@@ -122,6 +123,18 @@ acl_data: dict[str, Any] = {}
 # operator has opted into ACL enforcement, a broken/invalid file must fail closed (deny every
 # tool) rather than silently falling back to "no ACLs".
 acl_load_failed: bool = False
+
+
+def token_cache_key(jwt: str, cache_key_suffix: str) -> str:
+    """
+    Build the cml_client_cache key for a token-authenticated client.
+
+    Shared between on_request() (initial caching) and the set_cml_jwt tool
+    (re-keying after set_jwt() rotates a cached client's credentials in place),
+    so both sides always agree on the exact key format.
+    """
+    token_hash = hashlib.sha256(jwt.encode()).hexdigest()
+    return f"token:{token_hash}:{cache_key_suffix}"
 
 
 def _validate_acl_data(raw_acl_data: dict | None) -> dict | None:
@@ -375,14 +388,11 @@ class CustomHttpRequestMiddleware(Middleware):
         return default_enabled
 
     async def on_request(self, context: MiddlewareContext, call_next) -> Any:
-        # Import here to avoid circular dependency
-        from cml_mcp.tools.dependencies import _request_client, new_request_id, set_request_user_hash
-
         # Generate the audit-log correlation id as early as possible so every log line for
         # this request -- including rejections below -- can be tied together.
-        new_request_id()
-        set_request_user_hash("-")  # Reset; set once the caller is authenticated, below.
-        _request_client.set(None)
+        dependencies.new_request_id()
+        dependencies.set_request_user_hash("-")  # Reset; set once the caller is authenticated, below.
+        dependencies.request_client.set(None)
 
         try:
             return await self._on_request_impl(context, call_next)
@@ -391,12 +401,10 @@ class CustomHttpRequestMiddleware(Middleware):
             # whatever runs next on this task/context, even for early-reject paths (bad
             # Host, rate limit, malformed credentials) that never reach the nested
             # try/finally further down that guards the authenticated call_next() path.
-            set_request_user_hash("-")
-            _request_client.set(None)
+            dependencies.set_request_user_hash("-")
+            dependencies.request_client.set(None)
 
     async def _on_request_impl(self, context: MiddlewareContext, call_next) -> Any:
-        from cml_mcp.tools.dependencies import _request_client, cml_client_cache, set_request_user_hash
-
         CustomHttpRequestMiddleware._validate_request_host(context)
 
         try:
@@ -431,7 +439,7 @@ class CustomHttpRequestMiddleware(Middleware):
         # go through the normal path instead of being silently treated as anonymous).
         if anon_discovery_allowed and not cml_url and not auth_header:
             logger.debug("No CML credentials provided; allowing '%s' for MCP protocol discovery", context.method)
-            _request_client.set(None)
+            dependencies.request_client.set(None)
             return await call_next(context)
         if not cml_url and not settings.cml_url and not auth_header:
             # No credentials supplied for a method that requires them: this is a genuine
@@ -480,10 +488,20 @@ class CustomHttpRequestMiddleware(Middleware):
             # to the statically configured CML_URL: a request that supplies its own
             # X-CML-Server-URL must authenticate, so the configured credentials can never be
             # forwarded to (and harvested by) a client-chosen server, even an allow-listed one.
-            if settings.cml_mcp_allow_unauthenticated and not client_provided_url and settings.cml_username and settings.cml_password:
+            if (
+                settings.cml_mcp_allow_unauthenticated
+                and not client_provided_url
+                and ((settings.cml_username and settings.cml_password) or settings.cml_jwt)
+            ):
                 logger.debug("Using default CML credentials from settings (unauthenticated mode enabled)")
-                username = settings.cml_username
-                password = settings.cml_password
+                if settings.cml_jwt:
+                    username = None
+                    password = None
+                    jwt = settings.cml_jwt
+                else:
+                    username = settings.cml_username
+                    password = settings.cml_password
+                    jwt = None
             else:
                 # Missing/invalid credential format is a failed auth attempt: count it.
                 _enforce_auth_rate_limit(client_ip)
@@ -496,37 +514,59 @@ class CustomHttpRequestMiddleware(Middleware):
                 )
         else:
             parts = auth_header.split(None, 1)
-            if len(parts) != 2 or parts[0].lower() != "basic":
+            scheme = parts[0].lower() if parts else ""
+            if len(parts) != 2 or scheme not in ("basic", "bearer"):
                 _enforce_auth_rate_limit(client_ip)
                 logger.warning("Request rejected: malformed X-Authorization header")
                 raise McpError(
                     ErrorData(
-                        message="Invalid X-Authorization header format. Expected 'Basic <credentials>'",
+                        message="Invalid X-Authorization header format. Expected 'Basic <credentials>' or 'Bearer <token>'",
                         code=-31001,
                     )
                 )
-            try:
-                decoded = base64.b64decode(parts[1]).decode("utf-8")
-                username, password = decoded.split(":", 1)
-            except Exception:
-                _enforce_auth_rate_limit(client_ip)
-                logger.warning("Request rejected: failed to decode X-Authorization credentials")
-                raise McpError(
-                    ErrorData(
-                        message="Failed to decode Basic authentication credentials",
-                        code=-31002,
+            if scheme == "bearer":
+                # Long-lived CML API token auth: the token is used directly as the bearer
+                # credential, no username/password login round trip is needed.
+                jwt = parts[1].strip()
+                username = None
+                password = None
+                if not jwt:
+                    _enforce_auth_rate_limit(client_ip)
+                    logger.warning("Request rejected: empty Bearer token in X-Authorization header")
+                    raise McpError(
+                        ErrorData(
+                            message="Invalid X-Authorization header: Bearer token must not be empty",
+                            code=-31001,
+                        )
                     )
-                )
+            else:
+                try:
+                    decoded = base64.b64decode(parts[1]).decode("utf-8")
+                    username, password = decoded.split(":", 1)
+                except Exception:
+                    _enforce_auth_rate_limit(client_ip)
+                    logger.warning("Request rejected: failed to decode X-Authorization credentials")
+                    raise McpError(
+                        ErrorData(
+                            message="Failed to decode Basic authentication credentials",
+                            code=-31002,
+                        )
+                    )
+                jwt = None
         # Look for the user's client in the cache.
-        # Hash the password so it never appears in log output or dict keys.
-        pwd_hash = hashlib.sha256(password.encode()).hexdigest()
-        client_cache_key = f"{username}:{pwd_hash}:{cml_url}:{verify_ssl}"
-        # Redacted identifier for logs: never emit the raw username or cache key (which embeds
-        # the username), only a stable hash so operators can correlate log lines without PII.
-        # Same hashing the cache uses for its own log lines, so identifiers line up across modules.
+        # Hash the secret (password or token) so it never appears in log output or dict keys.
+        cache_key_suffix = f"{cml_url}:{verify_ssl}"
+        if jwt:
+            client_cache_key = token_cache_key(jwt, cache_key_suffix)
+        else:
+            pwd_hash = hashlib.sha256(password.encode()).hexdigest()
+            client_cache_key = f"userpass:{username}:{pwd_hash}:{cache_key_suffix}"
+        # Redacted identifier for logs: never emit the raw username/token or cache key, only a
+        # stable hash so operators can correlate log lines without exposing credentials. Same
+        # hashing the cache uses for its own log lines, so identifiers line up across modules.
         log_identifier = _redact_key(client_cache_key)
-        set_request_user_hash(log_identifier)
-        request_client = await cml_client_cache.get(client_cache_key)
+        dependencies.set_request_user_hash(log_identifier)
+        request_client = await dependencies.cml_client_cache.get(client_cache_key)
         if not request_client:
             # A cache miss means this request is a genuine new authentication attempt (about to
             # call CML's login endpoint) -- charge it against the per-IP and per-username
@@ -535,17 +575,29 @@ class CustomHttpRequestMiddleware(Middleware):
             # request in a session is never throttled by these limiters.
             _enforce_auth_rate_limit(client_ip, username=username, user_log_id=log_identifier)
             # Create a new client for this request.
-            request_client = CMLClient(cml_url, username, password, transport="http", verify_ssl=verify_ssl)
+            request_client = CMLClient(
+                cml_url,
+                username,
+                password,
+                jwt=jwt,
+                transport="http",
+                verify_ssl=verify_ssl,
+            )
             try:
                 await request_client.login()
             except Exception as e:
                 logger.warning("Authentication failed for %s: %s", log_identifier, e)
                 raise McpError(ErrorData(message=f"Unauthorized: {str(e)}", code=-31002))
 
-            await cml_client_cache.set(client_cache_key, request_client)
+            # Remember the key/suffix this client is cached under so set_cml_jwt can
+            # re-key it (rather than mutate it in place under its original key) after
+            # rotating its credentials -- see ThreadSafeCache.rekey().
+            request_client._cache_key = client_cache_key
+            request_client._cache_key_suffix = cache_key_suffix
+            await dependencies.cml_client_cache.set(client_cache_key, request_client)
 
         # Store the client in context variable for this request
-        _request_client.set(request_client)
+        dependencies.request_client.set(request_client)
         try:
             result = await call_next(context)
             logger.debug("Request to %s completed successfully", cml_url)
@@ -566,18 +618,15 @@ class CustomHttpRequestMiddleware(Middleware):
                     "Evicting stale cache entry for %s after re-auth failure",
                     log_identifier,
                 )
-                await cml_client_cache.invalidate(client_cache_key)
+                await dependencies.cml_client_cache.invalidate(client_cache_key)
             raise
         finally:
             # Clear the context vars so they don't leak into any subsequent work
             # on the same task.  Do NOT close the client here — it lives in the cache.
-            _request_client.set(None)
-            set_request_user_hash("-")
+            dependencies.request_client.set(None)
+            dependencies.set_request_user_hash("-")
 
     async def on_list_tools(self, context: MiddlewareContext, call_next) -> Sequence[Tool]:
-        # Import here to avoid circular dependency
-        from cml_mcp.tools.dependencies import get_cml_client_dep
-
         result = await call_next(context)
 
         # If no client available (unauthenticated discovery), return all tools
@@ -586,7 +635,7 @@ class CustomHttpRequestMiddleware(Middleware):
         # everything, and that must also apply to anonymous capability enumeration, not just
         # authenticated tool calls.
         try:
-            client = get_cml_client_dep()
+            client = dependencies.get_cml_client_dep()
         except RuntimeError:
             if acl_load_failed:
                 logger.warning("ACL file failed to load; denying anonymous tools/list (failing closed)")
@@ -626,13 +675,10 @@ class CustomHttpRequestMiddleware(Middleware):
         return "-"
 
     async def on_call_tool(self, context: MiddlewareContext, call_next) -> Any:
-        # Import here to avoid circular dependency
-        from cml_mcp.tools.dependencies import get_cml_client_dep, get_request_id, get_request_user_hash
-
         tool_name = context.message.name
         arguments = getattr(context.message, "arguments", None)
         resource_id = CustomHttpRequestMiddleware._extract_resource_id(arguments)
-        request_id = get_request_id()
+        request_id = dependencies.get_request_id()
 
         def audit(outcome: str, **extra: Any) -> None:
             # Structured, single-line audit log per tool invocation. Deliberately logs only the
@@ -642,7 +688,7 @@ class CustomHttpRequestMiddleware(Middleware):
             logger.info(
                 "AUDIT request_id=%s user=%s tool=%s resource=%s outcome=%s%s",
                 request_id,
-                get_request_user_hash(),
+                dependencies.get_request_user_hash(),
                 tool_name,
                 resource_id,
                 outcome,
@@ -650,7 +696,7 @@ class CustomHttpRequestMiddleware(Middleware):
             )
 
         try:
-            client = get_cml_client_dep()
+            client = dependencies.get_cml_client_dep()
         except RuntimeError:
             audit("denied", reason="unauthenticated")
             raise ToolError("CML credentials required. Provide X-CML-Server-URL and X-Authorization headers to call tools.")

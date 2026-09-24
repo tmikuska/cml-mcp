@@ -7,12 +7,12 @@ the PCAP tool to avoid buffering an oversized capture into memory."""
 import httpx
 import pytest
 
-from cml_mcp.cml_client import CMLClient, ResponseTooLargeError
+from cml_mcp.cml_client import ResponseTooLargeError
 
 
-def _client(handler) -> CMLClient:
+def _client(cls, handler):
     """Build a CMLClient wired to an httpx MockTransport, bypassing real auth/login."""
-    client = CMLClient.__new__(CMLClient)
+    client = cls.__new__(cls)
     client.needs_reauth = False
     client.base_url = "http://cml.example.com"
     client.api_base = "http://cml.example.com/api/v0"
@@ -34,8 +34,8 @@ def _handler(*, size: int, send_content_length: bool):
     return handler
 
 
-async def test_returns_full_body_when_under_cap():
-    client = _client(_handler(size=100, send_content_length=True))
+async def test_returns_full_body_when_under_cap(real_cml_client_class):
+    client = _client(real_cml_client_class, _handler(size=100, send_content_length=True))
     try:
         data = await client.get_binary_capped("/pcap/key", max_bytes=1000)
         assert data == b"x" * 100
@@ -43,8 +43,8 @@ async def test_returns_full_body_when_under_cap():
         await client.client.aclose()
 
 
-async def test_rejects_via_content_length_before_reading_body():
-    client = _client(_handler(size=2000, send_content_length=True))
+async def test_rejects_via_content_length_before_reading_body(real_cml_client_class):
+    client = _client(real_cml_client_class, _handler(size=2000, send_content_length=True))
     try:
         with pytest.raises(ResponseTooLargeError) as exc:
             await client.get_binary_capped("/pcap/key", max_bytes=1000)
@@ -54,9 +54,9 @@ async def test_rejects_via_content_length_before_reading_body():
         await client.client.aclose()
 
 
-async def test_rejects_via_running_total_when_no_content_length():
+async def test_rejects_via_running_total_when_no_content_length(real_cml_client_class):
     # No Content-Length header: the cap must still be enforced on the streamed byte total.
-    client = _client(_handler(size=2000, send_content_length=False))
+    client = _client(real_cml_client_class, _handler(size=2000, send_content_length=False))
     try:
         with pytest.raises(ResponseTooLargeError) as exc:
             await client.get_binary_capped("/pcap/key", max_bytes=1000)

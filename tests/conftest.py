@@ -304,6 +304,21 @@ if USE_MOCKS:
     cml_mcp.cml_client.CMLClient = lambda *args, **kwargs: MockCMLClient()
 
 
+@pytest.fixture
+def real_cml_client_class():
+    """The real (unmocked) CMLClient class, for unit tests that drive its methods directly.
+
+    The module-level monkeypatch above swaps ``cml_mcp.cml_client.CMLClient`` for a mock factory
+    when USE_MOCKS is set, so tests that need the genuine class (e.g. exercising get_binary_capped
+    against an httpx MockTransport) must obtain it here rather than importing the mocked name.
+    """
+    if USE_MOCKS:
+        return _original_cml_client_class
+    from cml_mcp.cml_client import CMLClient
+
+    return CMLClient
+
+
 def _custom_httpx_client_factory(headers=None, *args, **kwargs):
     """httpx client factory that disables SSL verification for self-signed certs."""
     kwargs["verify"] = False

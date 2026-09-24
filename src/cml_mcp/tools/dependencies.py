@@ -44,6 +44,7 @@ if settings.cml_mcp_transport == "stdio":
         str(settings.cml_url),
         settings.cml_username,
         settings.cml_password,
+        jwt=settings.cml_jwt,
         transport=str(settings.cml_mcp_transport),
         verify_ssl=settings.cml_verify_ssl,
     )
@@ -58,7 +59,7 @@ else:
 
 
 # Context variable to store request-scoped client for HTTP transport
-_request_client: contextvars.ContextVar[Optional[CMLClient]] = contextvars.ContextVar("request_client", default=None)
+request_client: contextvars.ContextVar[Optional[CMLClient]] = contextvars.ContextVar("request_client", default=None)
 
 # Context variables for audit logging (see tools/middleware.py). Both are request-scoped and
 # reset to their defaults outside of an active HTTP request/tool call.
@@ -125,7 +126,7 @@ def get_cml_client_dep() -> CMLClient:
     For stdio transport, returns the global singleton.
     """
     if settings.cml_mcp_transport == "http":
-        client = _request_client.get()
+        client = request_client.get()
         if client is None:
             raise RuntimeError(
                 "No request client available in contextvar. This usually means the tool "

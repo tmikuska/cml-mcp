@@ -76,6 +76,14 @@ class Settings(BaseSettings):
     cml_url: AnyHttpUrl | None = Field(default=None, description="URL of the Cisco Modeling Labs server")
     cml_username: str | None = Field(default=None, description="Username for CML server authentication")
     cml_password: str | None = Field(default=None, description="Password for CML server authentication")
+    cml_jwt: str | None = Field(
+        default=None,
+        description=(
+            "Long-lived CML API token (personal access token) used instead of CML_USERNAME/CML_PASSWORD. "
+            "Mutually exclusive with CML_USERNAME/CML_PASSWORD. Can be replaced at runtime via the "
+            "'set_cml_jwt' MCP tool without restarting the server."
+        ),
+    )
     cml_verify_ssl: bool = Field(
         default=True,
         description="Whether to verify the CML server's SSL certificate",
@@ -194,6 +202,26 @@ class Settings(BaseSettings):
     )
 
 
+def validate_stdio_auth(cml_url: str | None, cml_username: str | None, cml_password: str | None, cml_jwt: str | None) -> None:
+    """Validate the stdio-transport auth configuration, raising ValueError on any conflict.
+
+    Extracted from the module-level startup check so the mutual-exclusion rules between
+    CML_JWT and CML_USERNAME/CML_PASSWORD can be unit-tested without re-importing the module.
+    """
+    if not cml_url:
+        raise ValueError("CML_URL must be set when using stdio transport")
+    has_userpass = bool(cml_username or cml_password)
+    has_jwt = bool(cml_jwt)
+    if has_userpass and has_jwt:
+        raise ValueError(
+            "CML_JWT cannot be combined with CML_USERNAME/CML_PASSWORD. Configure exactly one authentication method for stdio transport."
+        )
+    if not has_userpass and not has_jwt:
+        raise ValueError("Either CML_JWT, or both CML_USERNAME and CML_PASSWORD, must be set when using stdio transport")
+    if has_userpass and not (cml_username and cml_password):
+        raise ValueError("CML_USERNAME and CML_PASSWORD must both be set together when not using CML_JWT")
+
+
 settings = Settings()
 if settings.cml_mcp_transport == TransportEnum.HTTP and not settings.cml_mcp_insecure:
     _bind_addr = settings.cml_mcp_bind
@@ -204,8 +232,7 @@ if settings.cml_mcp_transport == TransportEnum.HTTP and not settings.cml_mcp_ins
             " bind unless CML_MCP_INSECURE=true is explicitly set."
         )
 if settings.cml_mcp_transport == TransportEnum.STDIO:
-    if not settings.cml_url or not settings.cml_username or not settings.cml_password:
-        raise ValueError("CML_URL, CML_USERNAME, and CML_PASSWORD must be set when using stdio transport")
+    validate_stdio_auth(settings.cml_url, settings.cml_username, settings.cml_password, settings.cml_jwt)
 elif settings.cml_mcp_transport == TransportEnum.HTTP:
     # Fail fast at startup rather than lazily on the first request that supplies an
     # X-CML-Server-URL header. Without at least one of these, the middleware has no

@@ -330,8 +330,8 @@ Related hardening knobs, all optional:
 
 **What you need to know:**
 
-- **CML Credentials**: Instead of being set via environment variables (`CML_USERNAME`/`CML_PASSWORD`), CML credentials are provided via the `X-Authorization` HTTP header using Basic authentication format.
-- **Optional fallback credentials (opt-in)**: By default, HTTP requests with no `X-Authorization` header are rejected. To allow such requests to fall back to a server-configured identity, set `CML_MCP_ALLOW_UNAUTHENTICATED=true` **and** set `CML_USERNAME`/`CML_PASSWORD`. The fallback applies **only** to requests that use the statically configured `CML_URL` — a request that supplies its own `X-CML-Server-URL` is always required to authenticate, so the configured credentials can never be forwarded to a client-chosen (potentially attacker-controlled) server. **Security warning:** with the fallback enabled, any client that can reach the HTTP port can act as the configured identity without authenticating. Only enable this for trusted single-tenant deployments (e.g. a personal lab). The server logs a warning at startup whenever the fallback is active.
+- **CML Credentials**: Instead of being set via environment variables (`CML_USERNAME`/`CML_PASSWORD`), CML credentials are provided via the `X-Authorization` HTTP header using either Basic authentication format (`Basic <base64_username:password>`) or a long-lived CML API token as a Bearer token (`Bearer <cml_jwt>`).
+- **Optional fallback credentials (opt-in)**: By default, HTTP requests with no `X-Authorization` header are rejected. To allow such requests to fall back to a server-configured identity, set `CML_MCP_ALLOW_UNAUTHENTICATED=true` **and** set either `CML_USERNAME`/`CML_PASSWORD` or `CML_JWT`. The fallback applies **only** to requests that use the statically configured `CML_URL` — a request that supplies its own `X-CML-Server-URL` is always required to authenticate, so the configured credentials can never be forwarded to a client-chosen (potentially attacker-controlled) server. **Security warning:** with the fallback enabled, any client that can reach the HTTP port can act as the configured identity without authenticating. Only enable this for trusted single-tenant deployments (e.g. a personal lab). The server logs a warning at startup whenever the fallback is active.
 - **Multiple CML Hosts**: When running in HTTP mode, clients can connect to different CML servers by providing the `X-CML-Server-URL` header. For security, you must configure allowed URLs via the `CML_ALLOWED_URLS` environment variable (comma-separated list) or `CML_URL_PATTERN` (regex pattern). Matching compares only the **scheme, host, and port** of the requested URL — any userinfo (e.g. `https://trusted.example.com@evil.example.com`), path, or query is ignored, so a credentials-style prefix cannot be used to spoof an allowed host. `CML_URL_PATTERN` is matched with `re.fullmatch` against the whole canonical `scheme://host:port` origin, where the port is always filled in with the scheme default (80/443) when the client's URL omits it — **the pattern must therefore include the port and always be anchored with both `^` and a trailing `$`**, e.g. `^https://cml\.example\.com:443$`, otherwise it will either never match or match more hosts than intended.
 - **SSL verification**: The `X-CML-Verify-SSL` header (`true`/`false`) is honored **only** when the client supplies its own CML server via `X-CML-Server-URL`. Requests that fall back to the statically configured `CML_URL` always use the server's `CML_VERIFY_SSL` setting and cannot downgrade SSL verification via the header.
 - **Unauthenticated tool discovery**: MCP protocol initialization (`initialize`) and tool listing (`tools/list`) do **not** require credentials. This allows AI clients such as Cisco AI Canvas to discover available tools before the user has supplied CML credentials. Actual tool calls always require authentication.
@@ -340,6 +340,15 @@ Example headers:
 
 ```http
 X-Authorization: Basic <base64_encoded_cml_username:cml_password>
+```
+
+Or, using a long-lived CML API token instead of username/password:
+
+```http
+X-Authorization: Bearer <cml_jwt>
+```
+
+```http
 X-CML-Server-URL: https://cml-server.example.com
 X-CML-Verify-SSL: false
 ```
@@ -642,6 +651,11 @@ If credentials appear corrupted, you are likely hitting the Cursor / Windows Cla
 - `CML_PASSWORD` - Password for CML authentication
 
   > **HTTP mode:** `CML_USERNAME` and `CML_PASSWORD` are *optional* and act as fallback credentials when an incoming request omits the `X-Authorization` header (and only when `CML_MCP_ALLOW_UNAUTHENTICATED=true`). The fallback applies **only** to the statically configured `CML_URL`; a request that supplies its own `X-CML-Server-URL` is never given these credentials, so the configured identity cannot be exfiltrated to a client-chosen server. Leave them unset unless you intentionally want any unauthenticated client to assume those credentials.
+
+- `CML_JWT` - Long-lived CML API token (personal access token), used **instead of** `CML_USERNAME`/`CML_PASSWORD`. Mutually exclusive with them: in stdio mode the server refuses to start if both are set, or if neither is set. Obtain a token via CML's Settings > API Tokens (or the `POST /api/v0/access_tokens` API), then set `CML_JWT` to the raw token value. Recommended for long-running agent sessions since it survives MCP server restarts without requiring a password. If the token expires or is revoked, tool calls fail with a clear error instructing you to obtain a new token; you can then either call the `set_cml_jwt` MCP tool to update the running session in place (no restart required), or set a new `CML_JWT` and restart the server.
+
+  > **HTTP mode:** `CML_JWT` is *optional* and, like `CML_USERNAME`/`CML_PASSWORD`, only used as fallback-identity credentials when `CML_MCP_ALLOW_UNAUTHENTICATED=true`. Per-request token auth is provided via `X-Authorization: Bearer <token>` instead (see [HTTP Transport Mode](#http-transport-mode) above).
+
 
 ### Optional
 

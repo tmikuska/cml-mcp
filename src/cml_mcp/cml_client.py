@@ -22,8 +22,11 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 
+import base64
+import json
 import logging
 import os
+import uuid
 from typing import Any
 from urllib.parse import urlparse
 
@@ -76,7 +79,39 @@ if not logger.handlers:
     logger.propagate = False
 
 
-class CMLClient(object):
+class CMLTokenExpiredError(Exception):
+    """Raised when API-token based authentication fails because the configured CML API
+    token is invalid, expired, or has been revoked, and there are no username/password
+    credentials to fall back on for automatic re-authentication.
+
+    Tool modules already wrap client calls in a generic ``except Exception`` handler
+    that converts the exception to a ``ToolError`` with ``str(e)`` as the message, so
+    raising this with a clear, actionable message here is sufficient to surface a
+    helpful error to the calling LLM/agent without touching every tool module.
+    """
+
+
+def _decode_jwt_payload_unverified(token: str) -> dict:
+    """Best-effort, signature-unverified decode of a JWT's payload segment.
+
+    Used only to opportunistically recover the token owner's user id (the ``sub``
+    claim) for local bookkeeping -- resolving ``self.username`` so that
+    username-keyed features (ACLs, ``is_admin()``, pyATS testbed sync) keep working
+    when a client authenticates with only a bearer API token and no username. The CML
+    server independently verifies the token's signature and expiry on every request,
+    so an unverified local decode here carries no security implication: worst case we
+    simply fail to resolve an identity and those features degrade gracefully.
+    """
+    try:
+        _header, payload_b64, _signature = token.split(".", 2)
+        padding = "=" * (-len(payload_b64) % 4)
+        payload_bytes = base64.urlsafe_b64decode(payload_b64 + padding)
+        return json.loads(payload_bytes)
+    except Exception:
+        return {}
+
+
+class CMLClient:
     """
     Async client for interacting with the CML API.
     Handles authentication and provides methods to fetch system and lab information.
@@ -87,17 +122,28 @@ class CMLClient(object):
         host: str,
         username: str | None,
         password: str | None,
+        jwt: str | None = None,
         transport: str = "stdio",
         verify_ssl: bool = False,
     ) -> None:
         self.username = username
         self.password = password
+        self.jwt = jwt
         self.transport = transport
         self.verify_ssl = verify_ssl
 
         self._token = None
         self.admin = None
         self.needs_reauth = False
+
+        # HTTP-mode-only bookkeeping (always None in stdio mode): the cml_client_cache
+        # key this instance is currently stored under, and the non-secret suffix
+        # (CML URL + verify_ssl) of that key. Set by middleware.py after caching a new
+        # client, and used by the set_cml_jwt tool to re-key this client in the cache
+        # after set_jwt() rotates its credentials in place, rather than leaving it
+        # reachable under its stale original key.
+        self._cache_key: str | None = None
+        self._cache_key_suffix: str | None = None
 
         self.base_url = _validate_host(host.rstrip("/"))
         self.api_base = f"{self.base_url}/api/v0"
@@ -129,10 +175,82 @@ class CMLClient(object):
         else:
             self.client.headers.update({"Authorization": f"Bearer {self._token}"})
 
+    async def _probe_authok(self) -> None:
+        """
+        GET /api/v0/authok using the currently set self.token.
+        Raises httpx.HTTPStatusError (401 if the token is invalid/expired/revoked)
+        or httpx.RequestError on transport failures.
+        """
+        url = f"{self.base_url}/api/v0/authok"
+        resp = await self.client.get(url)
+        resp.raise_for_status()
+
+    async def _resolve_identity_from_token(self) -> None:
+        """
+        Best-effort resolution of self.username from the current bearer token when no
+        username was supplied (pure API-token auth). This keeps username-keyed features
+        (HTTP-mode ACLs, is_admin(), pyATS testbed sync in tools/cli.py) working when the
+        client authenticates with only CML_JWT / an X-Authorization Bearer header.
+        Failures here are non-fatal: self.username simply stays None and those features
+        degrade gracefully.
+        """
+        if self.username or not self.token:
+            return
+        payload = _decode_jwt_payload_unverified(self.token)
+        user_id = payload.get("sub")
+        if not user_id:
+            logger.warning("Could not resolve token owner: no 'sub' claim found in the CML JWT")
+            return
+        # The 'sub' claim is read from an unverified token, so validate it is a well-formed
+        # UUID before interpolating it into the users/{id} request path -- this both rejects
+        # junk claims early and prevents a crafted claim from reshaping the request URL.
+        try:
+            user_id = str(uuid.UUID(str(user_id)))
+        except (ValueError, TypeError):
+            logger.warning("Could not resolve token owner: 'sub' claim is not a valid user id")
+            return
+        try:
+            resp = await self.client.get(f"{self.api_base}/users/{user_id}")
+            resp.raise_for_status()
+            self.username = resp.json().get("username")
+        except Exception:
+            logger.warning("Failed to resolve username for the API-token authenticated session", exc_info=True)
+
     async def login(self) -> None:
         """
         Authenticate with the CML API and store the token for future requests.
+
+        If a long-lived API token was supplied (self.jwt), it is activated and
+        immediately validated against the server -- this is the persistent "long-term
+        token" auth path intended to replace username/password. If the token is
+        rejected, CMLTokenExpiredError is raised with an actionable message instead of
+        an opaque 401. Otherwise, the traditional username/password login flow is used.
         """
+        if self.jwt:
+            self.token = self.jwt
+            self.needs_reauth = False
+            try:
+                await self._probe_authok()
+            except httpx.HTTPStatusError as e:
+                self.token = None
+                self.needs_reauth = True
+                if e.response.status_code == 401:
+                    raise CMLTokenExpiredError(
+                        "The configured CML API token is invalid, expired, or has been revoked. Obtain a new "
+                        "token from CML and either call the 'set_cml_jwt' tool to update the running session "
+                        "without restarting, or set a new CML_JWT and restart the MCP server."
+                    ) from e
+                logger.exception("Failed to validate CML API token")
+                raise
+            except httpx.RequestError:
+                self.token = None
+                self.needs_reauth = True
+                logger.exception("Failed to validate CML API token")
+                raise
+            await self._resolve_identity_from_token()
+            logger.info("Activated CML API token for authentication")
+            return
+
         url = f"{self.base_url}/api/v0/authenticate"
         try:
             resp = await self.client.post(
@@ -148,16 +266,30 @@ class CMLClient(object):
             self.needs_reauth = True
             raise e
 
+    async def set_jwt(self, new_token: str) -> None:
+        """
+        Replace the API token used for authentication with a new one and validate it
+        immediately, without restarting the process or reconnecting the client.
+
+        Lets a caller (e.g. the 'set_cml_jwt' MCP tool) recover from a mid-session or
+        post-restart token expiry by supplying a fresh long-lived CML API token.
+        Raises CMLTokenExpiredError if the new token itself is rejected by the server.
+        """
+        self.jwt = new_token
+        self.token = None
+        self.username = None
+        self.admin = None
+        self.needs_reauth = False
+        await self.login()
+
     async def check_authentication(self) -> None:
         """
         Check if the current session is authenticated.
         If not, re-authenticate.
         """
         if self.token:
-            url = f"{self.base_url}/api/v0/authok"
             try:
-                resp = await self.client.get(url)
-                resp.raise_for_status()
+                await self._probe_authok()
                 return  # Already authenticated
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 401:  # Unauthorized, re-authenticate

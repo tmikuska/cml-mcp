@@ -443,7 +443,7 @@ class TestAuditLogOnCallTool:
         monkeypatch.setattr(CustomHttpRequestMiddleware, "check_tool_enabled", self._allow)
 
         middleware = CustomHttpRequestMiddleware()
-        context = _FakeToolContext("delete_cml_lab", {"lid": "lab-123", "confirm": True})
+        context = _FakeToolContext("delete_cml_lab", {"lab_id": "lab-123", "confirm": True})
 
         async def call_next(_ctx):
             return "ok"
@@ -471,7 +471,7 @@ class TestAuditLogOnCallTool:
         monkeypatch.setattr(CustomHttpRequestMiddleware, "check_tool_enabled", self._deny)
 
         middleware = CustomHttpRequestMiddleware()
-        context = _FakeToolContext("wipe_cml_lab", {"lid": "lab-456"})
+        context = _FakeToolContext("wipe_cml_lab", {"lab_id": "lab-456"})
 
         async def call_next(_ctx):
             raise AssertionError("call_next should not be reached when the tool is denied")
@@ -698,12 +698,12 @@ class TestOnListToolsRespectsAclLoadFailed:
 
     async def test_anonymous_list_tools_empty_when_acl_load_failed(self, monkeypatch):
         import cml_mcp.tools.middleware as mw
-        from cml_mcp.tools.dependencies import _request_client
+        from cml_mcp.tools.dependencies import request_client
 
         mw.acl_data.clear()
         mw.acl_load_failed = True
         monkeypatch.setattr(mw.settings, "cml_mcp_transport", "http")
-        token = _request_client.set(None)
+        token = request_client.set(None)
         try:
             fake_tools = [object(), object()]
 
@@ -714,16 +714,16 @@ class TestOnListToolsRespectsAclLoadFailed:
             result = await middleware.on_list_tools(context=None, call_next=fake_call_next)
             assert result == []
         finally:
-            _request_client.reset(token)
+            request_client.reset(token)
 
     async def test_anonymous_list_tools_unfiltered_when_acl_ok(self, monkeypatch):
         import cml_mcp.tools.middleware as mw
-        from cml_mcp.tools.dependencies import _request_client
+        from cml_mcp.tools.dependencies import request_client
 
         mw.acl_data.clear()
         mw.acl_load_failed = False
         monkeypatch.setattr(mw.settings, "cml_mcp_transport", "http")
-        token = _request_client.set(None)
+        token = request_client.set(None)
         try:
             fake_tools = [object(), object()]
 
@@ -734,4 +734,4 @@ class TestOnListToolsRespectsAclLoadFailed:
             result = await middleware.on_list_tools(context=None, call_next=fake_call_next)
             assert result == fake_tools
         finally:
-            _request_client.reset(token)
+            request_client.reset(token)

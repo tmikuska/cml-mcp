@@ -60,7 +60,7 @@ The easiest way to get started is using `uvx` with Claude Desktop (or other MCP-
 **Important:** Replace the placeholder values with your actual CML server details:
 
 - `CML_URL`: Your CML server address (e.g., `https://cml.example.com` or `https://10.10.20.50`)
-- `CML_USERNAME` and `CML_PASSWORD`: Your CML login credentials
+- `CML_USERNAME` and `CML_PASSWORD`: Your CML login credentials. Alternatively, set `CML_JWT` to a long-lived CML API token (personal access token) instead -- see [INSTALLATION.md](https://github.com/xorrkaz/cml-mcp/blob/main/INSTALLATION.md) for details. Configure exactly one of the two methods.
 - `CML_VERIFY_SSL`: TLS certificate verification now defaults to `"true"`. CML ships with a self-signed certificate out of the box, so **most users need to set this to `"false"`** (as shown above). Leave it at `"true"` only if you have installed a CA-signed certificate on your CML server (or point `CA_BUNDLE` at a file containing your self-signed certificate).
 
 > [!TIP]
@@ -82,7 +82,7 @@ The easiest way to get started is using `uvx` with Claude Desktop (or other MCP-
 
 ## Available MCP Tools
 
-The server provides 51 MCP tools organized into the following categories:
+The server provides 52 MCP tools organized into the following categories:
 
 ### Lab Management
 
@@ -164,6 +164,10 @@ irreversible effect and instructing the caller to re-invoke with `confirm=true`.
 LLM is expected to relay that error to the user, get an explicit "yes", and only then re-call
 the tool with `confirm=true` to actually perform the action. See [DEVELOPMENT.md](DEVELOPMENT.md#two-stage-confirm-for-destructive-tools)
 for the full rationale and pattern.
+
+### Authentication
+
+- **set_cml_jwt** - Replace the CML API token used for the current session with a new one, without restarting the MCP server (recovers from a token that expired mid-session or after a restart)
 
 ## Usage
 
