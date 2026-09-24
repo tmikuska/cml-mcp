@@ -32,7 +32,7 @@ import httpx
 from fastmcp.exceptions import ToolError
 
 from cml_mcp.cml.simple_webserver.schemas.common import DefinitionID
-from cml_mcp.cml.simple_webserver.schemas.node_definitions import NodeDefinition
+from cml_mcp.cml.simple_webserver.schemas.node_definitions import NodeDefinitionResponse
 from cml_mcp.cml_client import CMLClient
 from cml_mcp.tools.dependencies import get_cml_client_dep
 from cml_mcp.tools.errors import sanitize_http_error
@@ -41,7 +41,9 @@ from cml_mcp.types import SuperSimplifiedNodeDefinitionResponse
 logger = logging.getLogger("cml-mcp.tools.node_definitions")
 
 
-async def get_node_def_details(definition_id: DefinitionID, client: CMLClient) -> NodeDefinition:
+async def get_node_def_details(
+    definition_id: DefinitionID, client: CMLClient
+) -> NodeDefinitionResponse:
     """
     Get detailed information about a specific node definition by its ID.
 
@@ -49,10 +51,12 @@ async def get_node_def_details(definition_id: DefinitionID, client: CMLClient) -
         did (DefinitionID): The node definition ID.
 
     Returns:
-        NodeDefinition: The node definition details.
+        NodeDefinitionResponse: The node definition details.
     """
     node_definition = await client.get(f"/node_definitions/{definition_id}", params={"json": True})
-    return NodeDefinition(**node_definition).model_dump(exclude_unset=True)
+    # Full JSON responses include explicit nulls for optional fields; the response
+    # model coerces those before validation (the write NodeDefinition would reject them).
+    return NodeDefinitionResponse(**node_definition).model_dump(exclude_unset=True)
 
 
 def register_tools(mcp):
@@ -93,7 +97,7 @@ def register_tools(mcp):
             "readOnlyHint": True,
         },
     )
-    async def get_node_definition_detail(definition_id: DefinitionID) -> NodeDefinition:
+    async def get_node_definition_detail(definition_id: DefinitionID) -> NodeDefinitionResponse:
         """
         Get full details for one node definition by id: interfaces, default device config,
         boot options, and resource requirements.
