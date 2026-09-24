@@ -23,7 +23,6 @@ class _MockClient:
         self.closed = True
 
 
-@pytest.mark.asyncio
 async def test_get_set_cache_hit():
     c = ThreadSafeCache(ttl=60)
     client = _MockClient("a")
@@ -33,7 +32,6 @@ async def test_get_set_cache_hit():
     assert not client.closed
 
 
-@pytest.mark.asyncio
 async def test_get_miss_after_ttl():
     """TTL expiry uses wall clock; fake time is awkward because ``field(default_factory=time.time)``
     captures ``time.time`` when the dataclass is defined (after any import of this module).
@@ -47,7 +45,6 @@ async def test_get_miss_after_ttl():
     assert client.closed
 
 
-@pytest.mark.asyncio
 async def test_set_replaces_key_closes_previous():
     c = ThreadSafeCache(ttl=60)
     first = _MockClient("1")
@@ -58,7 +55,6 @@ async def test_set_replaces_key_closes_previous():
     assert await c.get("k") is second
 
 
-@pytest.mark.asyncio
 async def test_invalidate():
     c = ThreadSafeCache(ttl=60)
     client = _MockClient()
@@ -68,7 +64,6 @@ async def test_invalidate():
     assert await c.get("k") is None
 
 
-@pytest.mark.asyncio
 async def test_clear_closes_all():
     c = ThreadSafeCache(ttl=60)
     x = _MockClient("x")

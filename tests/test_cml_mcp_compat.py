@@ -76,7 +76,7 @@ async def test_user_tools(main_mcp_client: Client[FastMCPTransport]):
     )
     user_id = _extract_uuid(result)
 
-    del_result = await main_mcp_client.call_tool(name="delete_cml_user", arguments={"user_id": user_id})
+    del_result = await main_mcp_client.call_tool(name="delete_cml_user", arguments={"user_id": user_id, "confirm": True})
     assert del_result.data is True
 
 
@@ -91,7 +91,7 @@ async def test_group_tools(main_mcp_client: Client[FastMCPTransport]):
     )
     group_id = _extract_uuid(result)
 
-    del_result = await main_mcp_client.call_tool(name="delete_cml_group", arguments={"group_id": group_id})
+    del_result = await main_mcp_client.call_tool(name="delete_cml_group", arguments={"group_id": group_id, "confirm": True})
     assert del_result.data is True
 
 
@@ -127,7 +127,7 @@ async def compat_lab(main_mcp_client: Client[FastMCPTransport]):
     )
     lab_id = _extract_uuid(result)
     yield lab_id
-    await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": lab_id})
+    await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": lab_id, "confirm": True})
 
 
 async def test_get_labs(main_mcp_client: Client[FastMCPTransport], compat_lab):
@@ -175,7 +175,7 @@ async def test_clone_lab(main_mcp_client: Client[FastMCPTransport], compat_lab):
         arguments={"lab_id": compat_lab, "new_title": "MCP Compat Clone"},
     )
     clone_id = _extract_uuid(result)
-    del_result = await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": clone_id})
+    del_result = await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": clone_id, "confirm": True})
     assert del_result.data is True
 
 
@@ -187,7 +187,7 @@ async def test_create_full_topology(main_mcp_client: Client[FastMCPTransport]):
     result = await main_mcp_client.call_tool(name="create_full_lab_topology", arguments={"topology": topo_data})
     lab_id = _extract_uuid(result)
 
-    del_result = await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": lab_id})
+    del_result = await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": lab_id, "confirm": True})
     assert del_result.data is True
 
 
@@ -238,13 +238,13 @@ async def test_node_lifecycle(main_mcp_client: Client[FastMCPTransport], compat_
 
     wipe = await main_mcp_client.call_tool(
         name="wipe_cml_node",
-        arguments={"lab_id": compat_lab, "node_id": nid},
+        arguments={"lab_id": compat_lab, "node_id": nid, "confirm": True},
     )
     assert wipe.data is True
 
     delete = await main_mcp_client.call_tool(
         name="delete_cml_node",
-        arguments={"lab_id": compat_lab, "node_id": nid},
+        arguments={"lab_id": compat_lab, "node_id": nid, "confirm": True},
     )
     assert delete.data is True
 
@@ -425,7 +425,7 @@ async def test_annotation_crud(main_mcp_client: Client[FastMCPTransport], compat
 
     del_result = await main_mcp_client.call_tool(
         name="delete_annotation_from_lab",
-        arguments={"lab_id": compat_lab, "annotation_id": annotation_id},
+        arguments={"lab_id": compat_lab, "annotation_id": annotation_id, "confirm": True},
     )
     assert del_result.data is True
 
@@ -554,7 +554,7 @@ async def test_pcap_and_cli(main_mcp_client: Client[FastMCPTransport]):
         assert isinstance(pcap_data.content, list) and len(pcap_data.content) > 0
 
     finally:
-        await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": lab_id})
+        await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": lab_id, "confirm": True})
 
 
 # ---------------------------------------------------------------------------
@@ -594,8 +594,8 @@ async def test_lab_stop_wipe_delete(main_mcp_client: Client[FastMCPTransport]):
 
         await asyncio.sleep(5)
 
-        wipe = await main_mcp_client.call_tool(name="wipe_cml_lab", arguments={"lab_id": lab_id})
+        wipe = await main_mcp_client.call_tool(name="wipe_cml_lab", arguments={"lab_id": lab_id, "confirm": True})
         assert wipe.data is True
 
     finally:
-        await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": lab_id})
+        await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": lab_id, "confirm": True})

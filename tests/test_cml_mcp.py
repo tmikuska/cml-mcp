@@ -147,7 +147,7 @@ async def test_user_mgmt(main_mcp_client: Client[FastMCPTransport]):
     assert len(result.content) > 0
     assert isinstance(result.content[0], TextContent)
     user_id = UUID4Type(result.content[0].text)
-    del_result = await main_mcp_client.call_tool(name="delete_cml_user", arguments={"user_id": user_id})
+    del_result = await main_mcp_client.call_tool(name="delete_cml_user", arguments={"user_id": user_id, "confirm": True})
     assert del_result.data is True
 
     result = await main_mcp_client.call_tool(
@@ -158,7 +158,7 @@ async def test_user_mgmt(main_mcp_client: Client[FastMCPTransport]):
     assert len(result.content) > 0
     assert isinstance(result.content[0], TextContent)
     user_id = UUID4Type(result.content[0].text)
-    del_result = await main_mcp_client.call_tool(name="delete_cml_user", arguments={"user_id": user_id})
+    del_result = await main_mcp_client.call_tool(name="delete_cml_user", arguments={"user_id": user_id, "confirm": True})
     assert del_result.data is True
 
 
@@ -183,7 +183,7 @@ async def test_get_cml_groups(main_mcp_client: Client[FastMCPTransport]):
         assert isinstance(group, GroupResponse)
 
     # clean-up
-    _ = await main_mcp_client.call_tool(name="delete_cml_group", arguments={"group_id": group.id})
+    _ = await main_mcp_client.call_tool(name="delete_cml_group", arguments={"group_id": group.id, "confirm": True})
 
 
 @pytest.mark.live_only
@@ -196,7 +196,7 @@ async def test_group_mgmt(main_mcp_client: Client[FastMCPTransport]):
     assert len(result.content) > 0
     assert isinstance(result.content[0], TextContent)
     group_id = UUID4Type(result.content[0].text)
-    del_result = await main_mcp_client.call_tool(name="delete_cml_group", arguments={"group_id": group_id})
+    del_result = await main_mcp_client.call_tool(name="delete_cml_group", arguments={"group_id": group_id, "confirm": True})
     assert del_result.data is True
 
     result = await main_mcp_client.call_tool(
@@ -207,7 +207,7 @@ async def test_group_mgmt(main_mcp_client: Client[FastMCPTransport]):
     assert len(result.content) > 0
     assert isinstance(result.content[0], TextContent)
     group_id = UUID4Type(result.content[0].text)
-    del_result = await main_mcp_client.call_tool(name="delete_cml_group", arguments={"group_id": group_id})
+    del_result = await main_mcp_client.call_tool(name="delete_cml_group", arguments={"group_id": group_id, "confirm": True})
     assert del_result.data is True
 
 
@@ -468,7 +468,7 @@ async def test_full_cml_topology(main_mcp_client: Client[FastMCPTransport]):
     lab_id = UUID4Type(result.content[0].text)
 
     # Clean up - delete the lab
-    del_result = await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": lab_id})
+    del_result = await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": lab_id, "confirm": True})
     assert del_result.data is True
 
 
@@ -889,7 +889,6 @@ async def test_get_nodes_for_cml_lab(main_mcp_client: Client[FastMCPTransport], 
 
 
 @pytest.mark.mock_only
-@pytest.mark.asyncio
 async def test_download_lab_topology(main_mcp_client: Client[FastMCPTransport], created_lab: UUID4Type):
     """Test downloading a lab topology as YAML."""
     lab_id = created_lab
@@ -909,7 +908,6 @@ async def test_download_lab_topology(main_mcp_client: Client[FastMCPTransport], 
 
 
 @pytest.mark.mock_only
-@pytest.mark.asyncio
 async def test_clone_cml_lab(main_mcp_client: Client[FastMCPTransport], created_lab: UUID4Type):
     """Test cloning a CML lab with a router node."""
     source_lab_id = created_lab
@@ -937,12 +935,11 @@ async def test_clone_cml_lab(main_mcp_client: Client[FastMCPTransport], created_
     assert cloned_lab_id != source_lab_id
 
     # Clean up - delete clone lab
-    del_result = await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": cloned_lab_id})
+    del_result = await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": cloned_lab_id, "confirm": True})
     assert del_result.data is True
 
 
 @pytest.mark.live_only
-@pytest.mark.asyncio
 async def test_download_lab_topology_live(main_mcp_client: Client[FastMCPTransport], created_lab: UUID4Type):
     """Test downloading a lab topology as YAML against live CML server."""
     lab_id = created_lab
@@ -964,7 +961,6 @@ async def test_download_lab_topology_live(main_mcp_client: Client[FastMCPTranspo
 
 
 @pytest.mark.live_only
-@pytest.mark.asyncio
 async def test_clone_cml_lab_live(main_mcp_client: Client[FastMCPTransport], created_lab: UUID4Type):
     """Test cloning a CML lab with a router node against live CML server."""
     source_lab_id = created_lab
@@ -997,5 +993,5 @@ async def test_clone_cml_lab_live(main_mcp_client: Client[FastMCPTransport], cre
     assert len(cloned_nodes.content) > 0
 
     # Clean up - delete both labs (source is deleted in fixture)
-    del_result = await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": cloned_lab_id})
+    del_result = await main_mcp_client.call_tool(name="delete_cml_lab", arguments={"lab_id": cloned_lab_id, "confirm": True})
     assert del_result.data is True

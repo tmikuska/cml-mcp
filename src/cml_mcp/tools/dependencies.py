@@ -28,11 +28,8 @@ Dependency injection module for CML client management.
 
 import contextvars
 import logging
-from typing import Any, Optional
-
-from fastmcp import Context
-from mcp.shared.exceptions import McpError
-from mcp.types import INVALID_REQUEST, METHOD_NOT_FOUND
+import uuid
+from typing import Optional
 
 from cml_mcp.cml_client import CMLClient
 from cml_mcp.settings import settings
@@ -63,6 +60,50 @@ else:
 # Context variable to store request-scoped client for HTTP transport
 _request_client: contextvars.ContextVar[Optional[CMLClient]] = contextvars.ContextVar("request_client", default=None)
 
+# Context variables for audit logging (see tools/middleware.py). Both are request-scoped and
+# reset to their defaults outside of an active HTTP request/tool call.
+_request_id: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
+_request_user_hash: contextvars.ContextVar[str] = contextvars.ContextVar("request_user_hash", default="-")
+
+
+def new_request_id() -> str:
+    """
+    Generate a new short correlation id for the current HTTP request and store it in the
+    request-scoped context variable. Call once per inbound request, as early as possible
+    (before any other processing), so every subsequent log line for the request can include it.
+    """
+    request_id = uuid.uuid4().hex[:12]
+    _request_id.set(request_id)
+    return request_id
+
+
+def get_request_id() -> str:
+    """Return the current request's correlation id, or '-' outside of an HTTP request context."""
+    return _request_id.get()
+
+
+def set_request_user_hash(user_hash: str) -> None:
+    """Store the redacted (hashed) identifier for the authenticated user of the current request."""
+    _request_user_hash.set(user_hash)
+
+
+def get_request_user_hash() -> str:
+    """Return the redacted identifier for the current request's user, or '-' if unauthenticated."""
+    return _request_user_hash.get()
+
+
+class RequestIdLogFilter(logging.Filter):
+    """
+    Logging filter that injects the current request's correlation id into every log record as
+    `%(request_id)s`. Attach to a handler (not a specific logger) so it applies uniformly to all
+    `cml-mcp.*` child loggers that share that handler, without needing every call site to pass it
+    explicitly.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = get_request_id()
+        return True
+
 
 async def cleanup_global_client() -> None:
     """Cleanup global CML client resources. Must be called before event loop shutdown."""
@@ -75,45 +116,6 @@ async def cleanup_global_client() -> None:
             logger.exception("Error closing global CML client")
     else:
         logger.debug("No global CML client to clean up (HTTP mode or client is None)")
-
-
-async def elicit_confirmation(ctx: Context, message: str, response_type: Optional[Any] = ["yes", "no"]) -> bool:
-    """
-    Request confirmation via elicitation if the client supports it.
-
-    Checks client capabilities before calling ctx.elicit(). If the client does
-    not advertise elicitation support, returns True (proceed without confirmation).
-    Returns False if the user explicitly declined or cancelled.
-    """
-    # BUG: Elicitation is not working well with certain clients like Co-Pilot.  For now, rely on
-    # tool description instructions to ask for confirmation, and skip elicitation entirely.
-    # This is a temporary workaround until we can improve elicitation support.
-    #
-    # Okay!  So, the None response_type handling is buggy with some clients.  If we have a
-    # selectable "yes", "no" response, Co-Pilot works.  But now, we're duplicating confirmation.
-    # So, keep elicitation disabled for now.
-    return True
-    try:
-        session = ctx.session
-        client_params = session._client_params
-        if client_params is None or client_params.capabilities.elicitation is None:
-            logger.debug("Client does not support elicitation; proceeding without confirmation")
-            return True
-    except Exception:
-        # If capabilities cannot be determined, fall back to attempting the call.
-        pass
-
-    try:
-        result = await ctx.elicit(message, response_type=response_type)
-        return result.action == "accept"
-    except McpError as me:
-        if me.error.code in (METHOD_NOT_FOUND, INVALID_REQUEST):
-            logger.debug("Client rejected elicitation (%s); proceeding without confirmation", me.error.code)
-            return True
-        raise
-    except Exception as e:
-        logger.debug("elicit() failed (%s: %s); proceeding without confirmation", type(e).__name__, e)
-        return True
 
 
 def get_cml_client_dep() -> CMLClient:

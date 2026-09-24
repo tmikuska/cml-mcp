@@ -14,7 +14,9 @@ This guide will help you set up the CML MCP server so you can control Cisco Mode
   - [Using uvx (Easiest)](#using-uvx-easiest)
   - [Using FastMCP CLI](#using-fastmcp-cli)
 - [HTTP Transport](#http-transport)
+  - [Recommended deployment: behind a TLS-terminating reverse proxy](#recommended-deployment-behind-a-tls-terminating-reverse-proxy)
   - [Running the HTTP Server](#running-the-http-server)
+  - [Network exposure](#network-exposure)
   - [Configuring MCP Clients](#configuring-mcp-clients)
   - [Docker with HTTP](#docker-with-http-transport)
 
@@ -178,6 +180,45 @@ HTTP transport mode runs the MCP server as a standalone web service that multipl
 - ✅ You want the simplest setup
 - ✅ You're just trying out the tool
 
+### Recommended deployment: behind a TLS-terminating reverse proxy
+
+The MCP server itself only speaks plain HTTP and binds to `127.0.0.1` by default. **Always
+put a TLS-terminating reverse proxy in front of it** rather than exposing the server directly,
+and rather than disabling the loopback-only default. A minimal Caddy example:
+
+```
+# Caddyfile
+mcp.example.com {
+    reverse_proxy 127.0.0.1:9000
+}
+```
+
+Caddy automatically obtains and renews a certificate via Let's Encrypt. An equivalent nginx
+config:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name mcp.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/mcp.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/mcp.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:9000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+```
+
+With this layout, `cml-mcp` keeps its default `CML_MCP_BIND=127.0.0.1` — it never accepts a
+connection that didn't come through the proxy on the same host. You should **not** need to set
+`CML_MCP_INSECURE` or bind to `0.0.0.0` for this deployment model. Only set `CML_MCP_BIND` to a
+non-loopback address (and the required `CML_MCP_INSECURE=true`) if the proxy runs on a different
+host and you understand the exposure that implies — see [Network exposure](#network-exposure)
+below.
+
 ### Running the HTTP Server
 
 **Quick start:** To run the server in HTTP mode, you'll set some environment variables and then start the server with `uvicorn` (a Python web server).
@@ -206,11 +247,11 @@ You can either export these directly in your shell or create a `.env` file (reco
 # Set environment variables
 export CML_URL=<URL_OF_CML_SERVER>
 export CML_MCP_TRANSPORT=http
-export CML_MCP_BIND=0.0.0.0  # Optional, defaults to 0.0.0.0
-export CML_MCP_PORT=9000     # Optional, defaults to 9000
+export CML_MCP_BIND=127.0.0.1  # Default; loopback-only unless CML_MCP_INSECURE=true (see below)
+export CML_MCP_PORT=9000       # Optional, defaults to 9000
 
 # Run the server with uvicorn
-uvicorn cml_mcp.server:app --host 0.0.0.0 --port 9000 --workers 1
+uvicorn cml_mcp.server:app --host 127.0.0.1 --port 9000 --workers 1
 ```
 
 Or create a `.env` file with these settings:
@@ -218,7 +259,7 @@ Or create a `.env` file with these settings:
 ```sh
 CML_URL=<URL_OF_CML_SERVER>  # Optional in HTTP mode if using X-CML-Server-URL header
 CML_MCP_TRANSPORT=http
-CML_MCP_BIND=0.0.0.0
+CML_MCP_BIND=127.0.0.1  # Default; loopback-only. See "Network exposure" below to change.
 CML_MCP_PORT=9000
 CML_VERIFY_SSL=false  # Default is true; CML's self-signed cert requires false
 DEBUG=false  # Set to true to enable debug logging
@@ -247,7 +288,36 @@ source .venv/bin/activate
 cml-mcp
 ```
 
-The server will start and listen for plain HTTP connections at `http://0.0.0.0:9000`. For production or shared deployments, place a TLS-terminating reverse proxy (nginx, Caddy, etc.) in front of it before exposing it to clients.
+By default the server binds only to `127.0.0.1:9000` — it is not reachable from other hosts.
+For production or shared deployments, place a TLS-terminating reverse proxy (nginx, Caddy, etc.)
+on the same host in front of it, as shown above, rather than changing the bind address.
+
+### Network exposure
+
+`CML_MCP_BIND` defaults to `127.0.0.1` (loopback-only). If you set it to any non-loopback
+address (e.g. `0.0.0.0` or a specific interface IP) so the server accepts connections directly
+from other hosts, you must also set `CML_MCP_INSECURE=true` — otherwise the server refuses to
+start. This is a deliberate speed bump: binding non-loopback means the raw, unauthenticated-at-
+the-TCP-layer HTTP listener is reachable from other machines, and you are responsible for
+whatever network controls (firewall rules, a reverse proxy with TLS, VPN-only routing, etc.)
+make that safe. Prefer the reverse-proxy-on-loopback layout above instead of setting this.
+
+Related hardening knobs, all optional:
+
+- `CML_MCP_ALLOWED_HOSTS` — comma-separated list of `Host`/`Origin` values the server will
+  accept, to defend against DNS-rebinding attacks. Strongly recommended whenever the server is
+  reachable from a browser-capable client.
+- `CML_MCP_RATE_LIMIT_MAX_ATTEMPTS` / `CML_MCP_RATE_LIMIT_WINDOW` — per-IP and per-username
+  sliding-window rate limits on the auth path (default: a small number of attempts per window).
+- `CML_MCP_ALLOW_ANON_DISCOVERY` — by default, `tools/list` requires authentication like any
+  other MCP call. Set this to `true` only if an unauthenticated client (e.g. a skills registry
+  crawler) needs to enumerate tool names without credentials.
+- `CML_API_TIMEOUT` / `CML_API_CONNECT_TIMEOUT` — configurable connect/read/write/pool timeouts
+  for outbound requests to the CML controller (defaults are reasonable for most deployments).
+- `CML_PCAP_MAX_SIZE_BYTES` — caps the size of packet captures `get_packet_capture_data` will
+  return (default 64 MiB), to avoid a single large capture exhausting memory.
+
+
 
 ### Authentication in HTTP Mode
 
@@ -370,36 +440,58 @@ If your reverse proxy uses a self-signed certificate, add `NODE_TLS_REJECT_UNAUT
 
 ### Docker with HTTP Transport
 
-You can also run the server in HTTP mode using Docker:
+You can also run the server in HTTP mode using Docker. Inside the container, the server must
+bind to `0.0.0.0` (not the `127.0.0.1` default) so Docker's port-publishing (`-p`) can reach it
+— the container's network namespace already isolates it from the host and other containers, so
+this is the expected way to use `CML_MCP_INSECURE` in this deployment. Prefer publishing only to
+a loopback host port (`-p 127.0.0.1:9000:9000`) and terminating TLS with a reverse proxy on the
+host, rather than publishing directly to `0.0.0.0:9000` on the host:
 
 ```sh
 docker run -d \
   --rm \
   --name cml-mcp \
-  -p 9000:9000 \
+  -p 127.0.0.1:9000:9000 \
   -e CML_URL=<URL_OF_CML_SERVER> \
   -e CML_MCP_TRANSPORT=http \
+  -e CML_MCP_BIND=0.0.0.0 \
+  -e CML_MCP_INSECURE=true \
   xorrkaz/cml-mcp:latest
 ```
 
-This exposes the HTTP server on port 9000, allowing external MCP clients to connect.
+This exposes the HTTP server on `127.0.0.1:9000` on the host only; put a TLS-terminating reverse
+proxy in front of that (as in [Recommended deployment](#recommended-deployment-behind-a-tls-terminating-reverse-proxy))
+before allowing external MCP clients to connect.
 
 #### Using ACLs with Docker
 
-To use ACLs in Docker, mount your ACL file to `/app/acl.yaml`:
+Mount your ACL file to a path inside the container (`/app/acl.yaml` is a convenient
+convention) and set `CML_MCP_ACL_FILE` to that path explicitly. The file must be owned by
+the container's runtime uid (1000) and not group/other-writable, or the server will refuse
+to load it and fail closed (deny all tools) -- so `chown 1000:1000` (and `chmod go-w`) it on
+the host before mounting:
 
 ```sh
+chown 1000:1000 /path/to/your/acl.yaml
+chmod go-w /path/to/your/acl.yaml
+
 docker run -d \
   --rm \
   --name cml-mcp \
-  -p 9000:9000 \
+  -p 127.0.0.1:9000:9000 \
   -v /path/to/your/acl.yaml:/app/acl.yaml:ro \
   -e CML_URL=<URL_OF_CML_SERVER> \
   -e CML_MCP_TRANSPORT=http \
+  -e CML_MCP_BIND=0.0.0.0 \
+  -e CML_MCP_INSECURE=true \
+  -e CML_MCP_ACL_FILE=/app/acl.yaml \
   xorrkaz/cml-mcp:latest
 ```
 
-The Dockerfile sets `CML_MCP_ACL_FILE` to `/app/acl.yaml` by default, so you just need to mount your ACL configuration file to that path.
+`CML_MCP_ACL_FILE` has no built-in default -- if you don't set it, ACLs are simply not
+enforced (all tools allowed, same as running without Docker). Only set it once you actually
+have an ACL file mounted at that path; setting it without mounting a real file makes the
+server fail closed and deny every tool.
 
 ## Access Control Lists (HTTP Mode Only)
 
@@ -559,8 +651,14 @@ If credentials appear corrupted, you are likely hitting the Cursor / Windows Cla
 ### HTTP Transport Mode
 
 - `CML_MCP_TRANSPORT` - Set to `http` for HTTP mode (default: `stdio`)
-- `CML_MCP_BIND` - IP address to bind HTTP server (default: `0.0.0.0`)
+- `CML_MCP_BIND` - IP address to bind HTTP server (default: `127.0.0.1`, loopback-only). Setting this to any non-loopback address requires `CML_MCP_INSECURE=true` — see [Network exposure](#network-exposure).
 - `CML_MCP_PORT` - Port for HTTP server (default: `9000`)
+- `CML_MCP_INSECURE` - Required (`true`) alongside a non-loopback `CML_MCP_BIND`; the server refuses to start otherwise. Leave unset for the default loopback-only bind.
+- `CML_MCP_ALLOWED_HOSTS` - Comma-separated list of acceptable `Host`/`Origin` header values, to defend against DNS-rebinding attacks. Recommended whenever the server is reachable from a browser-capable client.
+- `CML_MCP_ALLOW_ANON_DISCOVERY` - Allow unauthenticated `tools/list` calls (default: `false`, i.e. discovery requires auth like any other tool call)
+- `CML_MCP_RATE_LIMIT_MAX_ATTEMPTS` / `CML_MCP_RATE_LIMIT_WINDOW` - Per-IP and per-username sliding-window rate limit for the auth path: max attempts per window (seconds)
+- `CML_API_TIMEOUT` / `CML_API_CONNECT_TIMEOUT` - Read/write/pool and connect timeouts (seconds) for outbound requests to the CML controller
+- `CML_PCAP_MAX_SIZE_BYTES` - Maximum packet-capture size `get_packet_capture_data` will return (default: 64 MiB); larger captures are rejected with a clear error
 - `CML_ALLOWED_URLS` - Comma-separated list of allowed CML URLs in HTTP mode (matched on scheme/host/port only)
 - `CML_URL_PATTERN` - Regex pattern for allowed CML URLs, applied to a canonical `scheme://host:port` origin (alternative to `CML_ALLOWED_URLS`)
 - `CML_MCP_ACL_FILE` - Path to YAML file for access control lists (tool restrictions per user)

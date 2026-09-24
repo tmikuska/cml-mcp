@@ -30,15 +30,13 @@ import logging
 from typing import Annotated
 
 import httpx
-from fastmcp import Context
 from fastmcp.exceptions import ToolError
-from mcp.shared.exceptions import McpError
-from mcp.types import INVALID_REQUEST, METHOD_NOT_FOUND
 
 from cml_mcp.cml.simple_webserver.schemas.common import GroupName, UserFullName, UserName, UUID4Type
 from cml_mcp.cml.simple_webserver.schemas.groups import GroupCreate, GroupResponse
 from cml_mcp.cml.simple_webserver.schemas.users import UserCreate, UserResponse
 from cml_mcp.tools.dependencies import get_cml_client_dep
+from cml_mcp.tools.errors import sanitize_http_error
 from cml_mcp.tools.model_helpers import build_payload, field_from
 
 logger = logging.getLogger("cml-mcp.tools.users_groups")
@@ -69,7 +67,7 @@ def register_tools(mcp):  # noqa: C901
             users = await client.get("/users")
             return [UserResponse(**user).model_dump(exclude_unset=True) for user in users]
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting CML user information")
             raise ToolError(e)
@@ -132,7 +130,7 @@ def register_tools(mcp):  # noqa: C901
             resp = await client.post("/users", data=payload)
             return UUID4Type(resp["id"])
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error creating CML user")
             raise ToolError(e)
@@ -144,12 +142,13 @@ def register_tools(mcp):  # noqa: C901
             "destructiveHint": True,
         },
     )
-    async def delete_cml_user(user_id: UUID4Type, ctx: Context) -> bool:
+    async def delete_cml_user(user_id: UUID4Type, confirm: bool = False) -> bool:
         """
         Delete a CML user by UUID. Requires admin privileges.
 
-        CRITICAL: Destructive and irreversible. Always ask "Confirm deletion of [user]?" and
-        wait for the user's "yes" before invoking this tool.
+        CRITICAL: Destructive and irreversible. This tool uses a two-stage confirm: call it once
+        with confirm omitted/false to preview, ask the user "Confirm deletion of [user]?", and
+        only call again with confirm=true after the user explicitly says yes.
 
         Examples:
         - "Delete user alice"
@@ -157,28 +156,18 @@ def register_tools(mcp):  # noqa: C901
         - "Get rid of user xyz"
         """
         client = get_cml_client_dep()
+        if not confirm:
+            raise ToolError(
+                f"This will irreversibly delete user {user_id}."
+                " Ask the user to confirm, then re-call this tool with confirm=true to proceed."
+            )
         try:
             if not await client.is_admin():
                 raise ValueError("Only admin users can delete users.")
-            elicit_supported = True
-            try:
-                result = await ctx.elicit("Are you sure you want to delete this user?", response_type=None)
-            except McpError as me:
-                if me.error.code == METHOD_NOT_FOUND or me.error.code == INVALID_REQUEST:
-                    elicit_supported = False
-                else:
-                    raise me
-            except Exception as e:
-                # Handle stream closure errors (common in stateless HTTP when client disconnects)
-                # Treat as if elicit is not supported and proceed without confirmation
-                logger.debug("elicit() failed (possibly client disconnect): %s: %s", type(e).__name__, e)
-                elicit_supported = False
-            if elicit_supported and result.action != "accept":
-                raise Exception("Delete operation cancelled by user.")
             await client.delete(f"/users/{user_id}")
             return True
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error deleting CML user")
             raise ToolError(e)
@@ -204,7 +193,7 @@ def register_tools(mcp):  # noqa: C901
             groups = await client.get("/groups")
             return [GroupResponse(**group).model_dump(exclude_unset=True) for group in groups]
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting CML group information")
             raise ToolError(e)
@@ -250,7 +239,7 @@ def register_tools(mcp):  # noqa: C901
             resp = await client.post("/groups", data=payload)
             return UUID4Type(resp["id"])
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error creating CML group")
             raise ToolError(e)
@@ -262,12 +251,13 @@ def register_tools(mcp):  # noqa: C901
             "destructiveHint": True,
         },
     )
-    async def delete_cml_group(group_id: UUID4Type, ctx: Context) -> bool:
+    async def delete_cml_group(group_id: UUID4Type, confirm: bool = False) -> bool:
         """
         Delete a CML group by UUID. Requires admin privileges.
 
-        CRITICAL: Destructive and irreversible. Always ask "Confirm deletion of [group]?" and
-        wait for the user's "yes" before invoking this tool.
+        CRITICAL: Destructive and irreversible. This tool uses a two-stage confirm: call it once
+        with confirm omitted/false to preview, ask the user "Confirm deletion of [group]?", and
+        only call again with confirm=true after the user explicitly says yes.
 
         Examples:
         - "Delete the 'students' group"
@@ -275,28 +265,18 @@ def register_tools(mcp):  # noqa: C901
         - "Get rid of the QA team group"
         """
         client = get_cml_client_dep()
+        if not confirm:
+            raise ToolError(
+                f"This will irreversibly delete group {group_id}."
+                " Ask the user to confirm, then re-call this tool with confirm=true to proceed."
+            )
         try:
             if not await client.is_admin():
                 raise ValueError("Only admin users can delete groups.")
-            elicit_supported = True
-            try:
-                result = await ctx.elicit("Are you sure you want to delete this group?", response_type=None)
-            except McpError as me:
-                if me.error.code == METHOD_NOT_FOUND or me.error.code == INVALID_REQUEST:
-                    elicit_supported = False
-                else:
-                    raise me
-            except Exception as e:
-                # Handle stream closure errors (common in stateless HTTP when client disconnects)
-                # Treat as if elicit is not supported and proceed without confirmation
-                logger.debug("elicit() failed (possibly client disconnect): %s: %s", type(e).__name__, e)
-                elicit_supported = False
-            if elicit_supported and result.action != "accept":
-                raise Exception("Delete operation cancelled by user.")
             await client.delete(f"/groups/{group_id}")
             return True
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error deleting CML group")
             raise ToolError(e)

@@ -93,8 +93,8 @@ The server provides 51 MCP tools organized into the following categories:
 - **set_cml_lab_permissions** - Configure group/user access (LAB_ADMIN, LAB_EDIT, LAB_EXEC, LAB_VIEW)
 - **start_cml_lab** - Start all nodes in a lab
 - **stop_cml_lab** - Stop all nodes in a lab
-- **wipe_cml_lab** - Wipe all node data/configurations (prompts for confirmation if client supports it)
-- **delete_cml_lab** - Delete a lab (prompts for confirmation if client supports it)
+- **wipe_cml_lab** - Wipe all node data/configurations (destructive; requires confirm=true, see Destructive tool confirmation below)
+- **delete_cml_lab** - Delete a lab (destructive; requires confirm=true, see Destructive tool confirmation below)
 - **get_cml_lab_by_title** - Find a lab by its title
 - **download_lab_topology** - Download lab topology as YAML file
 - **clone_cml_lab** - Clone a lab with optional new title
@@ -108,8 +108,8 @@ The server provides 51 MCP tools organized into the following categories:
 - **configure_cml_node** - Set node startup configuration
 - **start_cml_node** - Start a specific node
 - **stop_cml_node** - Stop a specific node
-- **wipe_cml_node** - Wipe node data (prompts for confirmation if client supports it)
-- **delete_cml_node** - Delete a node (prompts for confirmation if client supports it)
+- **wipe_cml_node** - Wipe node data (destructive; requires confirm=true, see Destructive tool confirmation below)
+- **delete_cml_node** - Delete a node (destructive; requires confirm=true, see Destructive tool confirmation below)
 - **get_console_log** - Get console output history for a node; optional `console` index selects the serial port (default `0`; Docker-based nodes often use both `0` and `1`)
 - **send_cli_command** - Execute CLI commands on running nodes via the native `/cli` API; optional `console` index selects which serial port to use
 
@@ -130,7 +130,7 @@ The server provides 51 MCP tools organized into the following categories:
 - **add_rectangle_annotation** - Add a rectangle annotation
 - **add_ellipse_annotation** - Add an ellipse annotation
 - **add_line_annotation** - Add a line annotation
-- **delete_annotation_from_lab** - Delete an annotation (prompts for confirmation if client supports it)
+- **delete_annotation_from_lab** - Delete an annotation (destructive; requires confirm=true, see Destructive tool confirmation below)
 
 ### Packet Capture (PCAP)
 
@@ -144,10 +144,10 @@ The server provides 51 MCP tools organized into the following categories:
 
 - **get_cml_users** - List all CML users
 - **create_cml_user** - Create a new user (requires admin)
-- **delete_cml_user** - Delete a user (requires admin, prompts for confirmation if client supports it)
+- **delete_cml_user** - Delete a user (requires admin; destructive, requires confirm=true, see Destructive tool confirmation below)
 - **get_cml_groups** - List all CML groups
 - **create_cml_group** - Create a new group (requires admin)
-- **delete_cml_group** - Delete a group (requires admin, prompts for confirmation if client supports it)
+- **delete_cml_group** - Delete a group (requires admin; destructive, requires confirm=true, see Destructive tool confirmation below)
 
 ### System Information
 
@@ -155,6 +155,15 @@ The server provides 51 MCP tools organized into the following categories:
 - **get_cml_status** - Get system health indicators
 - **get_cml_statistics** - Get resource usage and lab/node/link counts
 - **get_cml_licensing_details** - Get licensing information and limits
+
+### Destructive tool confirmation
+
+Every `wipe_*`/`delete_*` tool requires an explicit two-stage confirmation: the first call
+(omitting `confirm`, or `confirm=false`) always fails with a `ToolError` describing the
+irreversible effect and instructing the caller to re-invoke with `confirm=true`. A tool-calling
+LLM is expected to relay that error to the user, get an explicit "yes", and only then re-call
+the tool with `confirm=true` to actually perform the action. See [DEVELOPMENT.md](DEVELOPMENT.md#two-stage-confirm-for-destructive-tools)
+for the full rationale and pattern.
 
 ## Usage
 

@@ -97,7 +97,6 @@ def _find_empty_string_enums(schema: object) -> list[str]:
     return paths
 
 
-@pytest.mark.asyncio
 async def test_tool_input_schemas_have_no_empty_string_enums():
     """Gemini and strict MCP gateways reject enum values that include \"\"."""
     import importlib

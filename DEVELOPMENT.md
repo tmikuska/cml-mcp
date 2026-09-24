@@ -167,7 +167,7 @@ This is the most common contribution. The full conventions live in [AGENTS.md](A
     > **Why dicts and not Pydantic models for the request payload?** The auto-generated CML schemas are strict and frequently reject `None` even for fields that nominally default to `None`. Building a dict and letting the CML server validate avoids brittle re-typing in our tool layer. The exception is `create_full_lab_topology`, which accepts `Topology | dict | str` because the structure is genuinely deeply nested.
 
 4. **Annotate destructive/read-only behavior** in the `@mcp.tool(annotations={...})` block. Use `readOnlyHint`, `destructiveHint`, `idempotentHint`, `title`.
-5. **Destructive tools** (`wipe_*`, `delete_*`) must call `await elicit_confirmation(ctx, "...")` and include a `CRITICAL:` line in the docstring. **Note:** elicitation is currently disabled in [tools/dependencies.py](src/cml_mcp/tools/dependencies.py) (the helper short-circuits to `True`) because some MCP clients duplicate or mishandle `ctx.elicit()`. Until it's re-enabled, the `CRITICAL:` docstring line is the only thing pushing the LLM to confirm — so write it clearly. Keep the `await elicit_confirmation(...)` call in place so re-enabling is a one-line change.
+5. **Destructive tools** (`wipe_*`, `delete_*`) must accept an explicit `confirm: bool = False` parameter and include a `CRITICAL:` line in the docstring. See [Two-stage confirm for destructive tools](#two-stage-confirm-for-destructive-tools) below for the pattern. The `confirm` parameter plus the `CRITICAL:` docstring line are what push the LLM to confirm — so write the docstring clearly.
 6. **Admin-only tools** must gate with `if not await client.is_admin(): raise ValueError(...)`.
 7. **Register the tool** — if you added a new module, add a `register_tools(mcp)` call in `src/cml_mcp/server.py`. Tools inside an existing module are picked up automatically.
 8. **Add a mock fixture** if the tool calls a new CML REST endpoint — see [Recording Mock Responses](#recording-mock-responses).
@@ -197,6 +197,29 @@ async def get_nodes_for_cml_lab(lid: UUID4Type) -> list[Node]:
 - `exclude_defaults=True` — only when defaults are clearly noise (rare; risk: hides a server value that happens to equal the default).
 
 Add a brief one-line comment at the return site pointing back here (`# See DEVELOPMENT.md "Object-typed return values" ...`) so future contributors don't "clean up" the apparent redundancy.
+
+### Two-stage confirm for destructive tools
+
+Every `wipe_*`/`delete_*` tool implements confirmation itself via an explicit `confirm: bool = False` parameter:
+
+```python
+async def wipe_cml_lab(lab_id: UUID4Type, confirm: bool = False) -> bool:
+    client = get_cml_client_dep()
+    if not confirm:
+        raise ToolError(
+            f"This will irreversibly wipe lab {lab_id} ... "
+            "Ask the user to confirm, then re-call this tool with confirm=true to proceed."
+        )
+    await wipe_lab(lab_id, client)
+    return True
+```
+
+**How it works:** the first call (no `confirm`, or `confirm=false`) always raises a `ToolError` describing the irreversible effect and instructing the caller to re-invoke with `confirm=true`. A tool-calling LLM sees this error text and is expected to relay it to the user, get an explicit "yes", and only then re-call the tool with `confirm=true`. This is a two-stage commit: **stage 1** (preview/refuse) never touches the CML API; **stage 2** (`confirm=true`) performs the action.
+
+This is deliberately redundant with the `CRITICAL:` docstring instruction — the docstring is a soft nudge that some models ignore, while `confirm` is a hard, schema-visible gate that forces a second tool call no matter how the LLM behaves. When adding a new destructive tool, always add both.
+
+> **Why not `ctx.elicit()`?** MCP's native elicitation prompt was intentionally dropped: several clients (e.g. Co-Pilot) duplicate or mishandle `ctx.elicit()`, and it only works on elicitation-capable clients, whereas the `confirm` gate is a schema-level control that works on every client. The `confirm` two-stage gate is the single confirmation mechanism.
+
 
 ## Recording Mock Responses
 
@@ -352,8 +375,24 @@ cml-mcp/
 
 - Each `tools/*.py` module exports a `register_tools(mcp)` function called from `server.py`.
 - Tools obtain the CML client through `get_cml_client_dep()` (never instantiate `CMLClient` directly inside a tool).
-- The session cache in `cache.py` keeps authenticated `CMLClient` instances warm across HTTP requests, keyed by `username:pwd_hash:cml_url:verify_ssl` with an idle TTL (default 1 hour).
+- The session cache in `cache.py` keeps authenticated `CMLClient` instances warm across HTTP requests, keyed by `username:pwd_hash:cml_url:verify_ssl` with an idle TTL (default 1 hour, `CML_SESSION_TTL`).
+
+  **Credential lifetime caveat:** each cached `CMLClient` retains the user's plaintext password (needed to re-authenticate after the CML token expires) for as long as the entry survives -- i.e. up to `CML_SESSION_TTL` seconds after the *last* request that used it, not from when it was created. Operators who need short-lived credential exposure should set `CML_SESSION_TTL` accordingly. A more thorough fix (zero out the password once the CMLClient is evicted, and re-prompt via a fresh `X-Authorization` header if the client authenticates again before eviction) is tracked as a follow-up; it is more invasive than fits this pass because it changes the re-auth flow's error semantics (a request arriving after zeroing would need to fail with a clear "session expired, re-authenticate" error rather than silently reusing a blanked password).
 - Middleware in `middleware.py` enforces optional ACLs in HTTP mode (see `acl.yaml.example`). It also validates client-supplied CML URLs against `CML_ALLOWED_URLS` / `CML_URL_PATTERN` by parsing them with Pydantic's `AnyHttpUrl` and comparing only the scheme/host/port (userinfo, path, and query are ignored so they cannot spoof an allowed host). The `X-CML-Verify-SSL` header is honored only for requests that supply their own `X-CML-Server-URL`; requests using the default `CML_URL` always use `CML_VERIFY_SSL`.
+
+### Audit logging
+
+Every HTTP request gets a short correlation id (`tools/dependencies.py::new_request_id()`, generated at the very top of `CustomHttpRequestMiddleware.on_request`) stored in a `contextvars.ContextVar`. A `logging.Filter` (`RequestIdLogFilter`) attached to the `cml-mcp` logger's handler in `server.py` injects that id into every log record as `%(request_id)s`, so any log line emitted while handling a request -- from any module -- can be correlated without threading the id through every function signature. Outside of an HTTP request (stdio mode, or before authentication runs) the field defaults to `-`.
+
+`CustomHttpRequestMiddleware.on_call_tool` emits one structured `AUDIT` line per tool invocation at INFO level:
+
+```
+AUDIT request_id=<id> user=<hash> tool=<tool_name> resource=<id-or--> outcome=<success|failure|denied> [reason=<...>]
+```
+
+- `user` is the same redacted SHA-256-derived identifier used elsewhere (see log-redaction below) -- never the raw username.
+- `resource` is a best-effort id pulled from the tool's arguments (`_extract_resource_id`, checking common id-shaped kwargs like `lid`/`node_id`/`user_id` before falling back to any `*_id` key); it is `-` when nothing matches.
+- `outcome` is `denied` (with a `reason` of `unauthenticated` or `acl`) if the call never reached the tool body, `failure` if the tool raised, or `success` otherwise. The line intentionally never includes the full argument dict, since that could contain payload data or, in principle, sensitive fields.
 
 ### Why this layout
 
@@ -392,3 +431,18 @@ just publish
 ```
 
 **Bump the version in [pyproject.toml](pyproject.toml) and tag the release** before publishing. Update the relevant entries in `README.md` (tool count, what's new) and `AGENTS.md` (tool table) so the published artifacts match.
+
+### Refreshing pinned base image digests
+
+Both `FROM` lines in `Dockerfile` are pinned by digest (not just tag) so a compromised or
+re-tagged upstream image can't silently change what ships in a release. When bumping the Python
+version or picking up upstream fixes, refresh both digests together:
+
+```sh
+docker pull ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+docker pull python:3.13-slim-bookworm
+# Each `docker pull` prints "Digest: sha256:...". Paste that into the corresponding
+# FROM line as `image:tag@sha256:...`.
+```
+
+After bumping, rebuild and re-run `just test` against the new image before publishing.

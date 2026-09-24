@@ -35,6 +35,7 @@ from fastmcp.exceptions import ToolError
 from cml_mcp.cml.simple_common.schemas.system_health import SystemHealth
 from cml_mcp.cml.simple_webserver.schemas.system import SystemInformation, SystemStats
 from cml_mcp.tools.dependencies import get_cml_client_dep
+from cml_mcp.tools.errors import sanitize_http_error
 
 logger = logging.getLogger("cml-mcp.tools.system")
 
@@ -63,7 +64,7 @@ def register_tools(mcp):
             info = await client.get("/system_information")
             return SystemInformation(**info).model_dump(exclude_unset=True)
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting CML information")
             raise ToolError(e)
@@ -89,7 +90,7 @@ def register_tools(mcp):
             status = await client.get("/system_health")
             return SystemHealth(**status).model_dump(exclude_unset=True)
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting CML status")
             raise ToolError(e)
@@ -115,7 +116,7 @@ def register_tools(mcp):
             stats = await client.get("/system_stats")
             return SystemStats(**stats).model_dump(exclude_unset=True)
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting CML statistics")
             raise ToolError(e)
@@ -143,7 +144,7 @@ def register_tools(mcp):
             # is notably affected whereas Claude Desktop is not.
             return dict(licensing_info)
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting CML licensing details")
             raise ToolError(e)

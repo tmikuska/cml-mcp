@@ -25,11 +25,44 @@
 import logging
 import os
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
-API_TIMEOUT = 10  # seconds
+from cml_mcp.settings import settings
+
 MCP_CLIENT_IDENTIFIER = "CmlMCP"
+
+
+class ResponseTooLargeError(Exception):
+    """
+    Raised by :meth:`CMLClient.get_binary_capped` when a streamed binary download exceeds the
+    caller-supplied byte cap (either via the upstream ``Content-Length`` header or the running
+    total of streamed chunks). Carries the observed/declared size and the cap so callers can
+    build a user-facing message without re-buffering the body.
+    """
+
+    def __init__(self, size: int | None, max_bytes: int) -> None:
+        self.size = size
+        self.max_bytes = max_bytes
+        detail = f"{size} bytes" if size is not None else "an unknown number of bytes"
+        super().__init__(f"Response body is {detail}, exceeding the {max_bytes}-byte cap")
+
+
+def _validate_host(host: str) -> str:
+    """
+    Pre-validate a CML server URL before it is used to construct an httpx client.
+
+    Rejects anything that is not a well-formed http/https URL with a hostname, so a
+    malformed or scheme-less value (e.g. from a misconfigured env var or a client
+    header that slipped past middleware validation) fails fast with a clear error
+    instead of being silently mangled by httpx/urllib3.
+    """
+    parsed = urlparse(host)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ValueError(f"Invalid CML server URL '{host}': must be an absolute http(s) URL with a hostname")
+    return host
+
 
 # Set up logging for this module only
 logger = logging.getLogger("cml-mcp.cml_client")
@@ -66,14 +99,22 @@ class CMLClient(object):
         self.admin = None
         self.needs_reauth = False
 
-        self.base_url = host.rstrip("/")
+        self.base_url = _validate_host(host.rstrip("/"))
         self.api_base = f"{self.base_url}/api/v0"
         # follow_redirects is explicitly disabled (rather than relying on httpx's
         # current default of False) so a future httpx version bump can't silently
         # start following redirects and let a malicious/compromised CML endpoint
         # redirect the login POST (which carries the user's credentials) to an
         # arbitrary, non-allow-listed host.
-        self.client = httpx.AsyncClient(verify=verify_ssl, timeout=API_TIMEOUT, follow_redirects=False)
+        # Explicit connect/read/write/pool timeouts (rather than a single scalar) so a slow
+        # or hung connect phase can't block a request indefinitely longer than intended.
+        timeout = httpx.Timeout(
+            connect=settings.cml_api_connect_timeout,
+            read=settings.cml_api_timeout,
+            write=settings.cml_api_timeout,
+            pool=settings.cml_api_timeout,
+        )
+        self.client = httpx.AsyncClient(verify=verify_ssl, timeout=timeout, follow_redirects=False)
         self.client.headers.update({"X-CML-CLIENT": MCP_CLIENT_IDENTIFIER})
 
     @property
@@ -167,6 +208,41 @@ class CMLClient(object):
             return resp.json() if not is_binary else resp.content
         except httpx.RequestError as e:
             logger.exception("Error making GET request to %s", url)
+            raise e
+
+    async def get_binary_capped(self, endpoint: str, max_bytes: int, params: dict | None = None) -> bytes:
+        """
+        Stream a binary GET response, aborting as soon as it is known to exceed ``max_bytes``
+        so an oversized upstream body can never be fully buffered into memory.
+
+        The cap is enforced twice: first against the upstream ``Content-Length`` header (an early
+        rejection before any body is read), then against the running total of streamed chunks (in
+        case the header is missing or understates the size). Raises :class:`ResponseTooLargeError`
+        when the cap is exceeded; otherwise returns the full body as bytes.
+        """
+        await self.check_authentication()
+        url = f"{self.api_base}{endpoint}"
+        try:
+            async with self.client.stream("GET", url, params=params) as resp:
+                resp.raise_for_status()
+                declared = resp.headers.get("content-length")
+                if declared is not None:
+                    try:
+                        if int(declared) > max_bytes:
+                            raise ResponseTooLargeError(int(declared), max_bytes)
+                    except ValueError:
+                        # Malformed Content-Length: ignore the header and rely on the running cap.
+                        pass
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in resp.aiter_bytes():
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise ResponseTooLargeError(total, max_bytes)
+                    chunks.append(chunk)
+                return b"".join(chunks)
+        except httpx.RequestError as e:
+            logger.exception("Error streaming GET request to %s", url)
             raise e
 
     async def post(

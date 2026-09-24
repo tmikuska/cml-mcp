@@ -35,6 +35,7 @@ from fastmcp.exceptions import ToolError
 from cml_mcp.cml.simple_webserver.schemas.common import UUID4Type
 from cml_mcp.cml.simple_webserver.schemas.nodes import NodeLabel
 from cml_mcp.tools.dependencies import get_cml_client_dep
+from cml_mcp.tools.errors import sanitize_http_error
 from cml_mcp.types import ConsoleLogOutput
 
 logger = logging.getLogger("cml-mcp.tools.cli")
@@ -106,7 +107,7 @@ def register_tools(mcp):
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 400:
                 raise ToolError(f"Console index {console} does not exist for node {node_id}")
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting console log for node %s in lab %s", node_id, lab_id)
             raise ToolError(e)
@@ -157,7 +158,7 @@ def register_tools(mcp):
         try:
             return await _send_cli_command(client, lab_id, str(label), commands, config_command, console)
         except httpx.HTTPStatusError as e:
-            raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
+            raise sanitize_http_error(e)
         except ToolError:
             raise
         except Exception as e:

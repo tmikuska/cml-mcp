@@ -3,8 +3,13 @@ set -e
 
 # Do not default CML_URL. A baked-in hostname (e.g. cml.host.internal) can be
 # squatted on a customer LAN, silently redirecting credential POSTs.
+# Default to loopback-only, matching cml_mcp.settings' secure default. Binding to 0.0.0.0
+# (or any non-loopback address) now requires CML_MCP_INSECURE=true or the server refuses to
+# start -- see "Docker with HTTP Transport" in INSTALLATION.md for the supported pattern
+# (publish only to a loopback host port, or set both CML_MCP_BIND=0.0.0.0 and
+# CML_MCP_INSECURE=true deliberately).
 CML_MCP_TRANSPORT=${CML_MCP_TRANSPORT:-stdio}
-CML_MCP_BIND=${CML_MCP_BIND:-0.0.0.0}
+CML_MCP_BIND=${CML_MCP_BIND:-127.0.0.1}
 CML_MCP_PORT=${CML_MCP_PORT:-9000}
 DEBUG=${DEBUG:-false}
 

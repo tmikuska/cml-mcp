@@ -25,6 +25,7 @@
 """Definitions for a cache for session management."""
 
 import asyncio
+import hashlib
 import logging
 import time
 from asyncio import Lock
@@ -34,6 +35,11 @@ from typing import Dict, Optional
 from cml_mcp.cml_client import CMLClient
 
 logger = logging.getLogger("cml-mcp.cache")
+
+
+def _redact_key(key: str) -> str:
+    """Hash a cache key before logging it; cache keys embed the raw username and must never appear in logs."""
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 
 @dataclass
@@ -65,7 +71,7 @@ class ThreadSafeCache:
                 entry.timestamp = time.time()
                 return entry.value
             elif entry:
-                logger.debug("Cache entry for key %s has expired", key)
+                logger.debug("Cache entry for key %s has expired", _redact_key(key))
                 del self._cache[key]
                 expired_client = entry.value
         if expired_client:
@@ -105,7 +111,7 @@ class ThreadSafeCache:
         have failed regardless.  CMLClient.check_authentication() handles recovery.
         """
         async with self._lock:
-            logger.debug("Invalidating cache entry for key: %s", key)
+            logger.debug("Invalidating cache entry for key: %s", _redact_key(key))
             entry = self._cache.pop(key, None)
         if entry:
             await entry.value.close()

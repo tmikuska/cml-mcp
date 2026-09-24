@@ -22,11 +22,39 @@
 # OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 # SUCH DAMAGE.
 
+import json
 from enum import StrEnum
 from ipaddress import IPv4Address
+from typing import Annotated
 
-from pydantic import AnyHttpUrl, Field, IPvAnyAddress
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import AnyHttpUrl, Field, IPvAnyAddress, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+
+def _split_comma_separated(value: object) -> object:
+    """Allow list-typed settings to be supplied as a comma-separated env var string.
+
+    pydantic-settings normally requires JSON-array syntax (e.g. '["a","b"]') for env vars
+    backing list fields; a plain comma-separated string (the documented, human-friendly
+    format) would otherwise crash the server at startup with a SettingsError. Fields using
+    this validator are also annotated with NoDecode so pydantic-settings skips its own
+    JSON-decode attempt and hands us the raw string, so we still support the original
+    JSON-array syntax ourselves (some existing deployments/.env files may already use it) by
+    trying json.loads() first and only falling back to a comma split when that fails. Lists/
+    None pass through unchanged (e.g. values coming from Python code).
+    """
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.startswith("["):
+            try:
+                decoded = json.loads(stripped)
+            except json.JSONDecodeError:
+                pass
+            else:
+                if isinstance(decoded, list):
+                    return decoded
+        return [item.strip() for item in value.split(",") if item.strip()]
+    return value
 
 
 class TransportEnum(StrEnum):
@@ -57,17 +85,38 @@ class Settings(BaseSettings):
         description="Transport type for the MCP server",
     )
     cml_mcp_bind: IPvAnyAddress = Field(
-        default_factory=lambda: IPv4Address("0.0.0.0"),
-        description="IP address to bind the MCP server when transport is HTTP",
+        default_factory=lambda: IPv4Address("127.0.0.1"),
+        description=(
+            "IP address to bind the MCP server when transport is HTTP. Defaults to the loopback"
+            " address; binding to a non-loopback address requires CML_MCP_INSECURE=true."
+        ),
     )
     cml_mcp_port: int = Field(
         default=9000,
         description="Port to bind the MCP server when transport is HTTP",
     )
-    cml_allowed_urls: list[AnyHttpUrl] = Field(
-        default_factory=list,
-        description="List of allowed CML server URLs when transport is HTTP.  Empty list allows any URL.",
+    cml_mcp_insecure: bool = Field(
+        default=False,
+        description=(
+            "Must be explicitly set to True to allow CML_MCP_BIND to be a non-loopback address."
+            " Without it, the HTTP transport refuses to start with a public bind address, since"
+            " the built-in auth/ACL layer is not a substitute for a properly secured network"
+            " boundary (e.g. a TLS-terminating reverse proxy)."
+        ),
     )
+    cml_allowed_urls: Annotated[list[AnyHttpUrl], NoDecode] = Field(
+        default_factory=list,
+        description=(
+            "Comma-separated list of allowed CML server URLs when transport is HTTP (e.g."
+            " 'https://cml1.example.com,https://cml2.example.com'). Empty list allows any URL."
+        ),
+    )
+
+    @field_validator("cml_allowed_urls", mode="before")
+    @classmethod
+    def _parse_cml_allowed_urls(cls, value: object) -> object:
+        return _split_comma_separated(value)
+
     cml_url_pattern: str | None = Field(
         default=None,
         description=(
@@ -96,9 +145,64 @@ class Settings(BaseSettings):
         default=3600,
         description="Idle time in seconds before a cached CML client session expires (only applicable in HTTP transport mode).",
     )
+    cml_mcp_allow_anon_discovery: bool = Field(
+        default=False,
+        description=(
+            "HTTP transport only. The base MCP protocol handshake (initialize/ping/notifications) is always"
+            " reachable unauthenticated -- it never touches CML. When this is True, unauthenticated requests"
+            " may additionally call tools/list, so skills registries can enumerate capabilities without"
+            " credentials. Actual tool calls always require authentication regardless of this setting. Default"
+            " False requires auth for tools/list."
+        ),
+    )
+    cml_mcp_rate_limit_max_attempts: int = Field(
+        default=10,
+        description=(
+            "Maximum authentication attempts allowed per IP address (and separately per username) within"
+            " CML_MCP_RATE_LIMIT_WINDOW seconds."
+        ),
+    )
+    cml_mcp_rate_limit_window: int = Field(
+        default=60,
+        description="Sliding window, in seconds, used for CML_MCP_RATE_LIMIT_MAX_ATTEMPTS auth rate limiting.",
+    )
+    cml_mcp_allowed_hosts: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        description=(
+            "Comma-separated list of Host/Origin header values (host[:port]) accepted on incoming HTTP"
+            " requests, used to defend against DNS-rebinding attacks. Empty list disables Host/Origin"
+            " validation (not recommended for non-loopback binds)."
+        ),
+    )
+
+    @field_validator("cml_mcp_allowed_hosts", mode="before")
+    @classmethod
+    def _parse_cml_mcp_allowed_hosts(cls, value: object) -> object:
+        return _split_comma_separated(value)
+
+    cml_api_timeout: float = Field(
+        default=10.0,
+        description="Default read/write/pool timeout, in seconds, for requests made to the CML REST API.",
+    )
+    cml_api_connect_timeout: float = Field(
+        default=10.0,
+        description="Connect timeout, in seconds, for requests made to the CML REST API.",
+    )
+    cml_pcap_max_size_bytes: int = Field(
+        default=64 * 1024 * 1024,
+        description="Maximum size, in bytes, of a PCAP file that get_packet_capture_data will download and return (default 64 MiB).",
+    )
 
 
 settings = Settings()
+if settings.cml_mcp_transport == TransportEnum.HTTP and not settings.cml_mcp_insecure:
+    _bind_addr = settings.cml_mcp_bind
+    if not (getattr(_bind_addr, "is_loopback", False)):
+        raise ValueError(
+            "CML_MCP_BIND is set to a non-loopback address "
+            f"({_bind_addr}) but CML_MCP_INSECURE is not true. Refusing to start an HTTP transport with a public"
+            " bind unless CML_MCP_INSECURE=true is explicitly set."
+        )
 if settings.cml_mcp_transport == TransportEnum.STDIO:
     if not settings.cml_url or not settings.cml_username or not settings.cml_password:
         raise ValueError("CML_URL, CML_USERNAME, and CML_PASSWORD must be set when using stdio transport")
