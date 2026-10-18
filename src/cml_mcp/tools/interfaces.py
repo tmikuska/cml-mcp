@@ -28,7 +28,7 @@ Interface management tools for CML MCP server.
 
 import logging
 
-import httpx
+import httpx2
 from fastmcp.exceptions import ToolError
 
 from cml_mcp.cml.simple_webserver.schemas.common import MACAddress, UUID4Type
@@ -101,7 +101,7 @@ def register_tools(mcp):
                 mac_address=mac_address,
             )
             return await add_interface(lab_id, payload, client)
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error adding interface to node %s in lab %s", node, lab_id)
@@ -131,7 +131,7 @@ def register_tools(mcp):
             resp = await client.get(f"/labs/{lab_id}/nodes/{node_id}/interfaces", params={"data": True, "operational": False})
             # See DEVELOPMENT.md "Object-typed return values": dump after construction so FastMCP doesn't double-marshal.
             return [SimplifiedInterfaceResponse(**iface).model_dump(exclude_unset=True) for iface in resp]
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting interfaces for node %s in lab %s", node_id, lab_id)

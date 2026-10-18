@@ -30,7 +30,7 @@ import asyncio
 import logging
 from typing import Annotated
 
-import httpx
+import httpx2
 from fastmcp.exceptions import ToolError
 
 from cml_mcp.cml.simple_webserver.schemas.common import Coordinate, DefinitionID, TagArray, UUID4Type
@@ -103,7 +103,7 @@ def register_tools(mcp):  # noqa: C901
                         node["operational"]["serial_consoles"] = []
                 rnodes.append(Node(**node).model_dump(exclude_unset=True))
             return rnodes
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting nodes for CML lab %s", lab_id)
@@ -179,7 +179,7 @@ def register_tools(mcp):  # noqa: C901
                 data=payload,
             )
             return UUID4Type(resp["id"])
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error adding CML node to lab %s", lab_id)
@@ -210,7 +210,7 @@ def register_tools(mcp):  # noqa: C901
         try:
             await client.patch(f"/labs/{lab_id}/nodes/{node_id}", data=payload)
             return True
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error configuring CML node %s in lab %s", node_id, lab_id)
@@ -232,7 +232,7 @@ def register_tools(mcp):  # noqa: C901
         try:
             await stop_node(lab_id, node_id, client)
             return True
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error stopping CML node %s in lab %s", node_id, lab_id)
@@ -270,7 +270,7 @@ def register_tools(mcp):  # noqa: C901
                         break
                     await asyncio.sleep(3)
             return True
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error starting CML node %s in lab %s", node_id, lab_id)
@@ -301,7 +301,7 @@ def register_tools(mcp):  # noqa: C901
         try:
             await wipe_node(lab_id, node_id, client)
             return True
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error wiping CML node %s in lab %s", node_id, lab_id)
@@ -334,7 +334,7 @@ def register_tools(mcp):  # noqa: C901
             await wipe_node(lab_id, node_id, client)
             await client.delete(f"/labs/{lab_id}/nodes/{node_id}")
             return True
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error deleting CML node %s in lab %s", node_id, lab_id)

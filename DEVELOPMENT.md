@@ -21,7 +21,7 @@ This guide covers how to set up a development environment, common workflows, and
 
 ## Prerequisites
 
-- Python 3.12, 3.13, or 3.14
+- Python 3.12, 3.13, 3.14, or 3.15
 - [uv](https://docs.astral.sh/uv/) - Python package/project manager
 - [just](https://github.com/casey/just) - Command runner (strongly recommended; every workflow in this guide uses it)
 - [direnv](https://direnv.net/) - Environment variable manager (optional)
@@ -156,7 +156,7 @@ This is the most common contribution. The full conventions live in [AGENTS.md](A
             )
             resp = await client.post("/labs", data=payload)
             return UUID4Type(resp["id"])
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")
         except Exception as e:
             logger.exception("Error creating empty lab")

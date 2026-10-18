@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import httpx2
 import pytest
 from fastmcp.client import Client
 from fastmcp.client.transports import FastMCPTransport
@@ -32,7 +33,7 @@ MOCKS_DIR = Path(__file__).parent / "mocks"
 
 
 class MockHTTPXResponse:
-    """Mock httpx.Response for simulating API responses."""
+    """Mock httpx2.Response for simulating API responses."""
 
     def __init__(self, json_data: Any, status_code: int = 200):
         self._json_data = json_data
@@ -44,7 +45,7 @@ class MockHTTPXResponse:
 
     def raise_for_status(self):
         if self.status_code >= 400:
-            from httpx import HTTPStatusError, Request, Response
+            from httpx2 import HTTPStatusError, Request, Response
 
             request = Request("GET", "http://test")
             response = Response(self.status_code, request=request)
@@ -310,21 +311,13 @@ def real_cml_client_class():
 
     The module-level monkeypatch above swaps ``cml_mcp.cml_client.CMLClient`` for a mock factory
     when USE_MOCKS is set, so tests that need the genuine class (e.g. exercising get_binary_capped
-    against an httpx MockTransport) must obtain it here rather than importing the mocked name.
+    against an httpx2 MockTransport) must obtain it here rather than importing the mocked name.
     """
     if USE_MOCKS:
         return _original_cml_client_class
     from cml_mcp.cml_client import CMLClient
 
     return CMLClient
-
-
-def _custom_httpx_client_factory(headers=None, *args, **kwargs):
-    """httpx client factory that disables SSL verification for self-signed certs."""
-    kwargs["verify"] = False
-    kwargs["follow_redirects"] = True
-    kwargs["headers"] = headers
-    return httpx.AsyncClient(*args, **kwargs)
 
 
 @pytest.fixture()
@@ -351,6 +344,19 @@ async def live_cml_api_client():
         yield client
     finally:
         await client.close()
+
+
+def _custom_httpx_client_factory(headers=None, *args, **kwargs):
+    """httpx client factory for FastMCP Streamable HTTP (not httpx2).
+
+    FastMCP / the MCP SDK still speak Streamable HTTP through httpx. A custom
+    httpx2 factory hands httpx2.Timeout to anyio.fail_after. Keep follow_redirects
+    so a controller that 30x's /mcp still works in live tests.
+    """
+    kwargs["verify"] = False
+    kwargs["follow_redirects"] = True
+    kwargs["headers"] = headers
+    return httpx.AsyncClient(*args, **kwargs)
 
 
 @pytest.fixture()

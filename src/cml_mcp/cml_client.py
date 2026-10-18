@@ -30,7 +30,7 @@ import uuid
 from typing import Any
 from urllib.parse import urlparse
 
-import httpx
+import httpx2
 
 from cml_mcp.settings import settings
 
@@ -154,13 +154,13 @@ class CMLClient:
         # arbitrary, non-allow-listed host.
         # Explicit connect/read/write/pool timeouts (rather than a single scalar) so a slow
         # or hung connect phase can't block a request indefinitely longer than intended.
-        timeout = httpx.Timeout(
+        timeout = httpx2.Timeout(
             connect=settings.cml_api_connect_timeout,
             read=settings.cml_api_timeout,
             write=settings.cml_api_timeout,
             pool=settings.cml_api_timeout,
         )
-        self.client = httpx.AsyncClient(verify=verify_ssl, timeout=timeout, follow_redirects=False)
+        self.client = httpx2.AsyncClient(verify=verify_ssl, timeout=timeout, follow_redirects=False)
         self.client.headers.update({"X-CML-CLIENT": MCP_CLIENT_IDENTIFIER})
 
     @property
@@ -178,8 +178,8 @@ class CMLClient:
     async def _probe_authok(self) -> None:
         """
         GET /api/v0/authok using the currently set self.token.
-        Raises httpx.HTTPStatusError (401 if the token is invalid/expired/revoked)
-        or httpx.RequestError on transport failures.
+        Raises httpx2.HTTPStatusError (401 if the token is invalid/expired/revoked)
+        or httpx2.RequestError on transport failures.
         """
         url = f"{self.base_url}/api/v0/authok"
         resp = await self.client.get(url)
@@ -231,7 +231,7 @@ class CMLClient:
             self.needs_reauth = False
             try:
                 await self._probe_authok()
-            except httpx.HTTPStatusError as e:
+            except httpx2.HTTPStatusError as e:
                 self.token = None
                 self.needs_reauth = True
                 if e.response.status_code == 401:
@@ -242,7 +242,7 @@ class CMLClient:
                     ) from e
                 logger.exception("Failed to validate CML API token")
                 raise
-            except httpx.RequestError:
+            except httpx2.RequestError:
                 self.token = None
                 self.needs_reauth = True
                 logger.exception("Failed to validate CML API token")
@@ -291,14 +291,14 @@ class CMLClient:
             try:
                 await self._probe_authok()
                 return  # Already authenticated
-            except httpx.HTTPStatusError as e:
+            except httpx2.HTTPStatusError as e:
                 if e.response.status_code == 401:  # Unauthorized, re-authenticate
                     logger.debug("Authentication failed, re-authenticating")
                     self.token = None
                 else:
                     logger.exception("Error checking authentication")
                     raise e
-            except httpx.RequestError as e:
+            except httpx2.RequestError as e:
                 logger.exception("Error checking authentication")
                 raise e
 
@@ -338,7 +338,7 @@ class CMLClient:
             resp = await self.client.get(url, params=params)
             resp.raise_for_status()
             return resp.json() if not is_binary else resp.content
-        except httpx.RequestError as e:
+        except httpx2.RequestError as e:
             logger.exception("Error making GET request to %s", url)
             raise e
 
@@ -373,7 +373,7 @@ class CMLClient:
                         raise ResponseTooLargeError(total, max_bytes)
                     chunks.append(chunk)
                 return b"".join(chunks)
-        except httpx.RequestError as e:
+        except httpx2.RequestError as e:
             logger.exception("Error streaming GET request to %s", url)
             raise e
 
@@ -398,7 +398,7 @@ class CMLClient:
             if resp.status_code == 204:  # No content
                 return None
             return resp.json()
-        except httpx.RequestError as e:
+        except httpx2.RequestError as e:
             logger.exception("Error making POST request to %s", url)
             raise e
 
@@ -414,7 +414,7 @@ class CMLClient:
             if resp.status_code == 204:  # No content
                 return None
             return resp.json()
-        except httpx.RequestError as e:
+        except httpx2.RequestError as e:
             logger.exception("Error making PUT request to %s", url)
             raise e
 
@@ -430,7 +430,7 @@ class CMLClient:
             if resp.status_code == 204:  # No content
                 return None
             return resp.json()
-        except httpx.RequestError as e:
+        except httpx2.RequestError as e:
             logger.exception("Error making DELETE request to %s", url)
             raise e
 
@@ -446,7 +446,7 @@ class CMLClient:
             if resp.status_code == 204:  # No content
                 return None
             return resp.json()
-        except httpx.RequestError as e:
+        except httpx2.RequestError as e:
             logger.exception("Error making PATCH request to %s", url)
             raise e
 

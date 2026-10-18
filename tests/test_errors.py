@@ -1,17 +1,17 @@
 # Copyright (c) 2025-2026  Cisco Systems, Inc.
 # All rights reserved.
 
-import httpx
+import httpx2
 import pytest
 from fastmcp.exceptions import ToolError
 
 from cml_mcp.tools.errors import sanitize_http_error
 
 
-def _make_error(status_code: int, body: str) -> httpx.HTTPStatusError:
-    request = httpx.Request("GET", "https://cml.example.com/api/v0/labs")
-    response = httpx.Response(status_code, request=request, text=body)
-    return httpx.HTTPStatusError(f"{status_code} error", request=request, response=response)
+def _make_error(status_code: int, body: str) -> httpx2.HTTPStatusError:
+    request = httpx2.Request("GET", "https://cml.example.com/api/v0/labs")
+    response = httpx2.Response(status_code, request=request, text=body)
+    return httpx2.HTTPStatusError(f"{status_code} error", request=request, response=response)
 
 
 class TestSanitizeHttpError:

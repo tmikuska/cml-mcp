@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-`cml-mcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that exposes Cisco Modeling Labs (CML) operations as AI-callable tools. It is written in Python (≥ 3.12) using [FastMCP](https://github.com/jlowin/fastmcp) and direct CML REST API calls via `httpx`. The package is published to PyPI as `cml-mcp` and to Docker Hub as `xorrkaz/cml-mcp`.
+`cml-mcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that exposes Cisco Modeling Labs (CML) operations as AI-callable tools. It is written in Python (≥ 3.12) using [FastMCP](https://github.com/jlowin/fastmcp) and direct CML REST API calls via `httpx2`. The package is published to PyPI as `cml-mcp` and to Docker Hub as `xorrkaz/cml-mcp`.
 
 ## Compatibility Goal
 
@@ -121,7 +121,7 @@ When adding a new `@mcp.tool` to a module under `src/cml_mcp/tools/`:
 1. **Get the client via the dependency helper:** `client = get_cml_client_dep()` (do not import settings or instantiate `CMLClient` directly inside a tool).
 2. **Annotate destructive/read-only behavior** in the `annotations={...}` dict on `@mcp.tool` (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `title`).
 3. **Prefer flat primitive parameters** — see [Flat primitive arguments](#flat-primitive-arguments) below. Reserve `Model | dict | str` parameter unions for genuinely deep recursive structures (currently only `create_full_lab_topology`'s `topology`); for those, convert with `lenient_construct(Model, value)` from `tools/model_helpers.py`.
-4. **Wrap the body in `try/except`** — catch `httpx.HTTPStatusError` first and re-raise as `ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")`, then a generic `Exception` handler that logs with `logger.exception(...)` and re-raises as `ToolError(e)`.
+4. **Wrap the body in `try/except`** — catch `httpx2.HTTPStatusError` first and re-raise as `ToolError(f"HTTP error {e.response.status_code}: {e.response.text}")`, then a generic `Exception` handler that logs with `logger.exception(...)` and re-raises as `ToolError(e)`.
 5. **For destructive tools**, call `await elicit_confirmation(ctx, "...")` (from `tools/dependencies.py`) and put a `CRITICAL:` line in the docstring so LLMs ask the user even when `elicit` is unavailable.
 6. **For admin-only tools**, gate with `if not await client.is_admin(): raise ValueError(...)`.
 7. **Docstring format** — docstrings are written **exclusively for LLMs**, never humans. Do NOT reference internal repo paths (e.g. `tests/input_data/...`), contributor workflows, or other developer-only context inside a tool docstring; that material belongs in `AGENTS.md` or `DEVELOPMENT.md`. Use a one-line action summary, a few terse fact lines (required/optional fields, return shape, constraints), and an `Examples:` block with 2–3 sample user prompts to aid LLM tool selection on smaller models.
@@ -197,4 +197,4 @@ Register the tool by adding (or relying on) the module's `register_tools(mcp)` c
 
 ## Dependencies
 
-Core: `httpx`, `fastmcp>=3.1.1,<4`, `fastapi`, `pydantic_strict_partial`, `typer`. No pyATS or `virl2_client`.
+Core: `httpx2`, `fastmcp>=3.1.1,<4`, `fastapi`, `pydantic_strict_partial`, `typer`. No pyATS or `virl2_client`.

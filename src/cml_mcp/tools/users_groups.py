@@ -29,7 +29,7 @@ User and group management tools for CML MCP server.
 import logging
 from typing import Annotated
 
-import httpx
+import httpx2
 from fastmcp.exceptions import ToolError
 
 from cml_mcp.cml.simple_webserver.schemas.common import GroupName, UserFullName, UserName, UUID4Type
@@ -66,7 +66,7 @@ def register_tools(mcp):  # noqa: C901
         try:
             users = await client.get("/users")
             return [UserResponse(**user).model_dump(exclude_unset=True) for user in users]
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting CML user information")
@@ -129,7 +129,7 @@ def register_tools(mcp):  # noqa: C901
             )
             resp = await client.post("/users", data=payload)
             return UUID4Type(resp["id"])
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error creating CML user")
@@ -166,7 +166,7 @@ def register_tools(mcp):  # noqa: C901
                 raise ValueError("Only admin users can delete users.")
             await client.delete(f"/users/{user_id}")
             return True
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error deleting CML user")
@@ -192,7 +192,7 @@ def register_tools(mcp):  # noqa: C901
         try:
             groups = await client.get("/groups")
             return [GroupResponse(**group).model_dump(exclude_unset=True) for group in groups]
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting CML group information")
@@ -238,7 +238,7 @@ def register_tools(mcp):  # noqa: C901
             )
             resp = await client.post("/groups", data=payload)
             return UUID4Type(resp["id"])
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error creating CML group")
@@ -275,7 +275,7 @@ def register_tools(mcp):  # noqa: C901
                 raise ValueError("Only admin users can delete groups.")
             await client.delete(f"/groups/{group_id}")
             return True
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error deleting CML group")

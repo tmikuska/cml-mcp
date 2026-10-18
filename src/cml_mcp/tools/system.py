@@ -29,7 +29,7 @@ System information and statistics tools for CML MCP server.
 import logging
 from typing import Any
 
-import httpx
+import httpx2
 from fastmcp.exceptions import ToolError
 
 from cml_mcp.cml.simple_common.schemas.system_health import SystemHealth
@@ -63,7 +63,7 @@ def register_tools(mcp):
         try:
             info = await client.get("/system_information")
             return SystemInformation(**info).model_dump(exclude_unset=True)
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting CML information")
@@ -89,7 +89,7 @@ def register_tools(mcp):
         try:
             status = await client.get("/system_health")
             return SystemHealth(**status).model_dump(exclude_unset=True)
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting CML status")
@@ -115,7 +115,7 @@ def register_tools(mcp):
         try:
             stats = await client.get("/system_stats")
             return SystemStats(**stats).model_dump(exclude_unset=True)
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting CML statistics")
@@ -143,7 +143,7 @@ def register_tools(mcp):
             # with Python classes for datetime rather than as pure JSON.  Cursor
             # is notably affected whereas Claude Desktop is not.
             return dict(licensing_info)
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting CML licensing details")

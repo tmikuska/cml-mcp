@@ -30,7 +30,7 @@ import base64
 import logging
 from typing import Annotated, Literal
 
-import httpx
+import httpx2
 from fastmcp.exceptions import ToolError
 
 from cml_mcp.cml.simple_webserver.schemas.common import UUID4Type
@@ -98,7 +98,7 @@ def register_tools(mcp):
                 raise ValueError("Either 'maxpackets' or 'maxtime' must be specified")
             await client.put(f"/labs/{lab_id}/links/{link_id}/capture/start", data=payload)
             return True
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error starting packet capture on link %s in lab %s", link_id, lab_id)
@@ -120,7 +120,7 @@ def register_tools(mcp):
         try:
             await client.put(f"/labs/{lab_id}/links/{link_id}/capture/stop")
             return True
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error stopping packet capture on link %s in lab %s", link_id, lab_id)
@@ -144,7 +144,7 @@ def register_tools(mcp):
             status = await client.get(f"/labs/{lab_id}/links/{link_id}/capture/status")
             # See DEVELOPMENT.md "Object-typed return values": dump after construction so FastMCP doesn't double-marshal.
             return PCAPStatusResponse(**status).model_dump(exclude_unset=True)
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error checking packet capture status on link %s in lab %s", link_id, lab_id)
@@ -168,7 +168,7 @@ def register_tools(mcp):
             key = await get_capture_key(lab_id, link_id, client)
             packets = await client.get(f"/pcap/{key}/packets")
             return [PCAPItem(**packet).model_dump(exclude_unset=True) for packet in packets]
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting packet capture overview on link %s in lab %s", link_id, lab_id)
@@ -207,7 +207,7 @@ def register_tools(mcp):
             # Encode the binary PCAP data to a base64 string
             encoded_pcap = base64.b64encode(pcap_data).decode("utf-8")
             return encoded_pcap
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except ToolError:
             raise

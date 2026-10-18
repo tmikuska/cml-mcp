@@ -28,7 +28,7 @@ Node definition tools for CML MCP server.
 
 import logging
 
-import httpx
+import httpx2
 from fastmcp.exceptions import ToolError
 
 from cml_mcp.cml.simple_webserver.schemas.common import DefinitionID
@@ -81,7 +81,7 @@ def register_tools(mcp):
         try:
             node_definitions = await client.get("/simplified_node_definitions")
             return [SuperSimplifiedNodeDefinitionResponse(**nd).model_dump(exclude_unset=True) for nd in node_definitions]
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting CML node definitions")
@@ -106,7 +106,7 @@ def register_tools(mcp):
         client = get_cml_client_dep()
         try:
             return await get_node_def_details(definition_id, client)
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting node definition detail for %s", definition_id)

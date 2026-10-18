@@ -29,7 +29,7 @@ Annotation management tools for CML MCP server.
 import logging
 from typing import Annotated, Literal
 
-import httpx
+import httpx2
 from fastmcp.exceptions import ToolError
 from pydantic import BaseModel
 
@@ -116,7 +116,7 @@ def register_tools(mcp):
                 # See model_helpers.py / DEVELOPMENT.md: dump after construction to bypass FastMCP double marshalling.
                 ann_list.append(model(**annotation).model_dump(exclude_unset=True))
             return ann_list
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting annotations for lab %s", lab_id)
@@ -189,7 +189,7 @@ def register_tools(mcp):
             )
             resp = await client.post(f"/labs/{lab_id}/annotations", data=_wire_border_style(payload))
             return UUID4Type(resp["id"])
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error adding text annotation to lab %s", lab_id)
@@ -255,7 +255,7 @@ def register_tools(mcp):
             )
             resp = await client.post(f"/labs/{lab_id}/annotations", data=_wire_border_style(payload))
             return UUID4Type(resp["id"])
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error adding rectangle annotation to lab %s", lab_id)
@@ -319,7 +319,7 @@ def register_tools(mcp):
             )
             resp = await client.post(f"/labs/{lab_id}/annotations", data=_wire_border_style(payload))
             return UUID4Type(resp["id"])
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error adding ellipse annotation to lab %s", lab_id)
@@ -387,7 +387,7 @@ def register_tools(mcp):
             payload["line_end"] = line_end
             resp = await client.post(f"/labs/{lab_id}/annotations", data=_wire_border_style(payload))
             return UUID4Type(resp["id"])
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error adding line annotation to lab %s", lab_id)
@@ -426,7 +426,7 @@ def register_tools(mcp):
         try:
             await client.delete(f"/labs/{lab_id}/annotations/{annotation_id}")
             return True
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error deleting annotation %s from lab %s", annotation_id, lab_id)

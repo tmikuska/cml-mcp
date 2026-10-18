@@ -64,7 +64,7 @@ class ThreadSafeCache:
         # How often the background sweep (see _sweep_loop) walks the whole cache
         # evicting expired entries. Defaults to the TTL itself, capped at 300s so a
         # very large CML_SESSION_TTL doesn't leave stale entries (and their open
-        # httpx.AsyncClient connection pools) sitting around for hours before the
+        # httpx2.AsyncClient connection pools) sitting around for hours before the
         # first sweep.
         self._sweep_interval = sweep_interval if sweep_interval is not None else min(ttl, 300)
         self._sweep_task: asyncio.Task | None = None
@@ -75,7 +75,7 @@ class ThreadSafeCache:
         get() only evicts an expired entry when that same key is looked up again, so a
         client that is cached once and never looked up again (e.g. a one-off token used
         for a single burst of requests) would otherwise stay in memory -- along with its
-        open httpx.AsyncClient connection pool -- for the entire life of the process.
+        open httpx2.AsyncClient connection pool -- for the entire life of the process.
         This periodic sweep instead walks the whole cache every _sweep_interval seconds
         and evicts anything past its TTL regardless of whether it is ever looked up
         again, bounding memory use by "recently active unique credentials" rather than

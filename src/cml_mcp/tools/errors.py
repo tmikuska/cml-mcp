@@ -34,7 +34,7 @@ messages and logs the full upstream body server-side only.
 
 import logging
 
-import httpx
+import httpx2
 from fastmcp.exceptions import ToolError
 
 logger = logging.getLogger("cml-mcp.tools.errors")
@@ -50,13 +50,13 @@ _GENERIC_MESSAGES = {
 }
 
 
-def sanitize_http_error(e: httpx.HTTPStatusError) -> ToolError:
+def sanitize_http_error(e: httpx2.HTTPStatusError) -> ToolError:
     """
     Build a ToolError with a generic, status-code-keyed message, and log the full
     upstream response body server-side (never returned to the client).
 
     Args:
-        e: The httpx.HTTPStatusError raised by the failed request.
+        e: The httpx2.HTTPStatusError raised by the failed request.
 
     Returns:
         A ToolError safe to raise back to the MCP client.

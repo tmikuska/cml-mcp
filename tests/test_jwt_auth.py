@@ -14,7 +14,7 @@ import json
 import time
 import uuid
 
-import httpx
+import httpx2
 import pytest
 
 from cml_mcp.cml_client import CMLTokenExpiredError, _decode_jwt_payload_unverified
@@ -199,18 +199,18 @@ def _jwt_client(cls, handler, *, jwt: str):
     client._token = None
     client.base_url = "http://cml.example.com"
     client.api_base = "http://cml.example.com/api/v0"
-    client.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client.client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     return client
 
 
 def _identity_handler(paths: list, *, authok_status: int = 200, username: str = "alice"):
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         paths.append(request.url.path)
         if request.url.path.endswith("/authok"):
-            return httpx.Response(authok_status)
+            return httpx2.Response(authok_status)
         if "/users/" in request.url.path:
-            return httpx.Response(200, json={"username": username})
-        return httpx.Response(404)
+            return httpx2.Response(200, json={"username": username})
+        return httpx2.Response(404)
 
     return handler
 

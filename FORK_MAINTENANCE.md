@@ -50,7 +50,7 @@ Everything from `origin/main`, **plus**:
 - **Native CLI API** — `send_cli_command` uses `POST /labs/{id}/nodes/{id}/cli`
   on the current CML controller (2.11). No `virl2_client`, PyATS, or Unicon
   on the wheel, and no fallback for older controller versions.
-- **No `virl2_client` dependency** — `cml_client.py` is httpx-only; CLI uses
+- **No `virl2_client` dependency** — `cml_client.py` is httpx2-only; CLI uses
   the REST API directly.
 - **Test infrastructure** — top-level `conftest.py`, `tests/test_cache.py`,
   `tests/test_cml_mcp_compat.py`, and updates to `tests/mocks/*.json` so

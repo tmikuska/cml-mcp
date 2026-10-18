@@ -4,7 +4,7 @@
 """Tests for CMLClient.get_binary_capped -- the streamed, size-capped binary download used by
 the PCAP tool to avoid buffering an oversized capture into memory."""
 
-import httpx
+import httpx2
 import pytest
 
 from cml_mcp.cml_client import ResponseTooLargeError
@@ -16,7 +16,7 @@ def _client(cls, handler):
     client.needs_reauth = False
     client.base_url = "http://cml.example.com"
     client.api_base = "http://cml.example.com/api/v0"
-    client.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    client.client = httpx2.AsyncClient(transport=httpx2.MockTransport(handler))
     client._token = "test-token"
 
     async def _noauth() -> None:
@@ -27,9 +27,9 @@ def _client(cls, handler):
 
 
 def _handler(*, size: int, send_content_length: bool):
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         headers = {"content-length": str(size)} if send_content_length else {}
-        return httpx.Response(200, content=b"x" * size, headers=headers)
+        return httpx2.Response(200, content=b"x" * size, headers=headers)
 
     return handler
 

@@ -29,7 +29,7 @@ Link management tools for CML MCP server.
 import logging
 from typing import Annotated
 
-import httpx
+import httpx2
 from fastmcp.exceptions import ToolError
 
 from cml_mcp.cml.simple_webserver.schemas.common import UUID4Type
@@ -76,7 +76,7 @@ def register_tools(mcp):
             payload = build_payload(src_int=str(src_int), dst_int=str(dst_int))
             resp = await client.post(f"/labs/{lab_id}/links", data=payload)
             return UUID4Type(resp["id"])
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error creating link between %s and %s", src_int, dst_int)
@@ -102,7 +102,7 @@ def register_tools(mcp):
         try:
             resp = await client.get(f"/labs/{lab_id}/links", params={"data": True})
             return [LinkResponse(**link).model_dump(exclude_unset=True) for link in resp]
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting links for lab %s", lab_id)
@@ -168,7 +168,7 @@ def register_tools(mcp):
             )
             await client.patch(f"/labs/{lab_id}/links/{link_id}/condition", data=payload)
             return True
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error conditioning link %s in lab %s", link_id, lab_id)
@@ -195,7 +195,7 @@ def register_tools(mcp):
         try:
             await client.put(f"/labs/{lab_id}/links/{link_id}/state/start")
             return True
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error starting CML link %s in lab %s", link_id, lab_id)
@@ -222,7 +222,7 @@ def register_tools(mcp):
         try:
             await client.put(f"/labs/{lab_id}/links/{link_id}/state/stop")
             return True
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error stopping CML link %s in lab %s", link_id, lab_id)

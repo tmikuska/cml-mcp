@@ -31,7 +31,7 @@ import logging
 import re
 from typing import Annotated
 
-import httpx
+import httpx2
 import yaml
 from fastmcp.exceptions import ToolError
 
@@ -168,7 +168,7 @@ def register_tools(mcp):  # noqa: C901
                 if not user or lab_details.get("owner_username") == str(user):
                     ulabs.append(Lab(**lab_details).model_dump(exclude_unset=True))
             return ulabs
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting CML labs")
@@ -211,7 +211,7 @@ def register_tools(mcp):  # noqa: C901
             )
             resp = await client.post("/labs", data=payload)
             return UUID4Type(resp["id"])
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error creating empty lab topology")
@@ -255,7 +255,7 @@ def register_tools(mcp):  # noqa: C901
             )
             await client.patch(f"/labs/{lab_id}", data=payload)
             return True
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error modifying lab %s", lab_id)
@@ -299,7 +299,7 @@ def register_tools(mcp):  # noqa: C901
             return True
         except ToolError:
             raise
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error setting lab permissions for lab %s", lab_id)
@@ -344,7 +344,7 @@ def register_tools(mcp):  # noqa: C901
             if isinstance(topology, (dict, str)):
                 topology = lenient_construct(Topology, parse_json_arg(topology))
             return await create_full_topology_from_obj(topology, client)
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error creating lab topology")
@@ -377,7 +377,7 @@ def register_tools(mcp):  # noqa: C901
                         break
                     await asyncio.sleep(3)
             return True
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error starting CML lab %s", lab_id)
@@ -419,7 +419,7 @@ def register_tools(mcp):  # noqa: C901
         try:
             await stop_lab(lab_id, client)
             return True
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error stopping CML lab %s", lab_id)
@@ -455,7 +455,7 @@ def register_tools(mcp):  # noqa: C901
         try:
             await wipe_lab(lab_id, client)
             return True
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error wiping CML lab %s", lab_id)
@@ -492,7 +492,7 @@ def register_tools(mcp):  # noqa: C901
             await wipe_lab(lab_id, client)  # Ensure the lab is wiped before deletion
             await client.delete(f"/labs/{lab_id}")
             return True
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error deleting CML lab %s", lab_id)
@@ -518,7 +518,7 @@ def register_tools(mcp):  # noqa: C901
                 if lab["lab_title"] == str(title):
                     return Lab(**lab).model_dump(exclude_unset=True)
             raise ValueError(f"Lab with title '{title}' not found.")
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error getting CML lab by title %s", title)
@@ -540,7 +540,7 @@ def register_tools(mcp):  # noqa: C901
         client = get_cml_client_dep()
         try:
             return await download_lab_file(lab_id, client)
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error downloading lab topology for lab %s", lab_id)
@@ -570,7 +570,7 @@ def register_tools(mcp):  # noqa: C901
 
             topology = Topology(**yaml_data)
             return await create_full_topology_from_obj(topology, client)
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except Exception as e:
             logger.exception("Error cloning CML lab %s", lab_id)

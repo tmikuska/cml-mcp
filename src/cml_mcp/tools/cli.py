@@ -29,7 +29,7 @@ CLI command and console log tools for CML MCP server.
 import logging
 import re
 
-import httpx
+import httpx2
 from fastmcp.exceptions import ToolError
 
 from cml_mcp.cml.simple_webserver.schemas.common import UUID4Type
@@ -104,7 +104,7 @@ def register_tools(mcp):
         return_lines = []
         try:
             resp = await client.get(f"/labs/{lab_id}/nodes/{node_id}/consoles/{console}/log")
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             if e.response.status_code == 400:
                 raise ToolError(f"Console index {console} does not exist for node {node_id}")
             raise sanitize_http_error(e)
@@ -157,7 +157,7 @@ def register_tools(mcp):
 
         try:
             return await _send_cli_command(client, lab_id, str(label), commands, config_command, console)
-        except httpx.HTTPStatusError as e:
+        except httpx2.HTTPStatusError as e:
             raise sanitize_http_error(e)
         except ToolError:
             raise
