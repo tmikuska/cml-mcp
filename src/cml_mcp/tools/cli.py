@@ -29,7 +29,7 @@ CLI command and console log tools for CML MCP server.
 import logging
 import re
 
-import httpx
+import httpx2 as httpx
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from fastmcp.telemetry import get_tracer

@@ -29,7 +29,7 @@ System information and statistics tools for CML MCP server.
 import logging
 from typing import Any
 
-import httpx
+import httpx2 as httpx
 from fastmcp.exceptions import ToolError
 
 from cml_mcp.cml.simple_common.schemas.system_health import SystemHealth

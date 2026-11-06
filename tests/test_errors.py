@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026  Cisco Systems, Inc.
 # All rights reserved.
 
-import httpx
+import httpx2 as httpx
 import pytest
 from fastmcp.exceptions import ToolError
 

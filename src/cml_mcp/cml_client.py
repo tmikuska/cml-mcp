@@ -30,7 +30,7 @@ import uuid
 from typing import Any
 from urllib.parse import urlparse
 
-import httpx
+import httpx2 as httpx
 
 from cml_mcp.settings import settings
 
@@ -54,12 +54,12 @@ class ResponseTooLargeError(Exception):
 
 def _validate_host(host: str) -> str:
     """
-    Pre-validate a CML server URL before it is used to construct an httpx client.
+    Pre-validate a CML server URL before it is used to construct an httpx2 client.
 
     Rejects anything that is not a well-formed http/https URL with a hostname, so a
     malformed or scheme-less value (e.g. from a misconfigured env var or a client
     header that slipped past middleware validation) fails fast with a clear error
-    instead of being silently mangled by httpx/urllib3.
+    instead of being silently mangled by httpx2.
     """
     parsed = urlparse(host)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
@@ -147,8 +147,8 @@ class CMLClient:
 
         self.base_url = _validate_host(host.rstrip("/"))
         self.api_base = f"{self.base_url}/api/v0"
-        # follow_redirects is explicitly disabled (rather than relying on httpx's
-        # current default of False) so a future httpx version bump can't silently
+        # follow_redirects is explicitly disabled (rather than relying on httpx2's
+        # current default of False) so a future httpx2 version bump can't silently
         # start following redirects and let a malicious/compromised CML endpoint
         # redirect the login POST (which carries the user's credentials) to an
         # arbitrary, non-allow-listed host.
@@ -453,7 +453,7 @@ class CMLClient:
     async def close(self) -> None:
         """Close the HTTP client and clean up all resources."""
         try:
-            # Close the httpx async client which should clean up connection pools and semaphores
+            # Close the httpx2 async client which should clean up connection pools and semaphores
             await self.client.aclose()
             logger.debug("HTTP client closed successfully")
         except Exception:

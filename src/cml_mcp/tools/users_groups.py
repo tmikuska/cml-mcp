@@ -29,7 +29,7 @@ User and group management tools for CML MCP server.
 import logging
 from typing import Annotated
 
-import httpx
+import httpx2 as httpx
 from fastmcp.exceptions import ToolError
 
 from cml_mcp.cml.simple_webserver.schemas.common import GroupName, UserFullName, UserName, UUID4Type

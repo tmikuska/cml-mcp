@@ -9,14 +9,18 @@ license = "BSD-2-Clause AND LicenseRef-Proprietary"
 license-files = ["LICENSE", "CISCO_LICENSE.md"]
 authors = [{ name = "Joe Clarke", email = "jclarke@cisco.com" }]
 description = "Cisco Modeling Labs CML MCP Server"
-requires-python = ">=3.12,<3.15"
+requires-python = ">=3.12,<3.16"
 readme = "README.md"
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "httpx",
+    "httpx2>=2.14,<3",
     "fastmcp>=3.4.11,<4",
     "fastapi",
     "pydantic_strict_partial",
@@ -52,6 +56,8 @@ cml-mcp = { workspace = true }
 dev = [
     "pytest",
     "pytest-asyncio",
+    # FastMCP's Streamable HTTP test transport still imports the original package.
+    "httpx",
     "inline-snapshot[black]",
     "black",
     "isort",

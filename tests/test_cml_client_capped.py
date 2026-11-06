@@ -4,14 +4,14 @@
 """Tests for CMLClient.get_binary_capped -- the streamed, size-capped binary download used by
 the PCAP tool to avoid buffering an oversized capture into memory."""
 
-import httpx
+import httpx2 as httpx
 import pytest
 
 from cml_mcp.cml_client import ResponseTooLargeError
 
 
 def _client(cls, handler):
-    """Build a CMLClient wired to an httpx MockTransport, bypassing real auth/login."""
+    """Build a CMLClient wired to an httpx2 MockTransport, bypassing real auth/login."""
     client = cls.__new__(cls)
     client.needs_reauth = False
     client.base_url = "http://cml.example.com"

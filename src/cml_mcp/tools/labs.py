@@ -31,7 +31,7 @@ import logging
 import re
 from typing import Annotated
 
-import httpx
+import httpx2 as httpx
 import yaml
 from fastmcp.exceptions import ToolError
 

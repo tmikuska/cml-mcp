@@ -34,7 +34,7 @@ messages and logs the full upstream body server-side only.
 
 import logging
 
-import httpx
+import httpx2 as httpx
 from fastmcp.exceptions import ToolError
 
 logger = logging.getLogger("cml-mcp.tools.errors")
@@ -56,7 +56,7 @@ def sanitize_http_error(e: httpx.HTTPStatusError) -> ToolError:
     upstream response body server-side (never returned to the client).
 
     Args:
-        e: The httpx.HTTPStatusError raised by the failed request.
+        e: The httpx2 HTTPStatusError raised by the failed request.
 
     Returns:
         A ToolError safe to raise back to the MCP client.
