@@ -30,7 +30,7 @@ import asyncio
 import logging
 from typing import Annotated
 
-import httpx
+import httpx2 as httpx
 from fastmcp.exceptions import ToolError
 
 from cml_mcp.cml.simple_webserver.schemas.common import Coordinate, DefinitionID, TagArray, UUID4Type

@@ -14,7 +14,7 @@ import json
 import time
 import uuid
 
-import httpx
+import httpx2 as httpx
 import pytest
 
 from cml_mcp.cml_client import CMLTokenExpiredError, _decode_jwt_payload_unverified
@@ -189,7 +189,7 @@ class TestSweepOnce:
 # CMLClient JWT login / set_jwt / identity resolution
 # --------------------------------------------------------------------------- #
 def _jwt_client(cls, handler, *, jwt: str):
-    """Build a real CMLClient wired to an httpx MockTransport, configured for JWT auth."""
+    """Build a real CMLClient wired to an httpx2 MockTransport, configured for JWT auth."""
     client = cls.__new__(cls)
     client.username = None
     client.password = None

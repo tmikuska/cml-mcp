@@ -28,7 +28,7 @@ Interface management tools for CML MCP server.
 
 import logging
 
-import httpx
+import httpx2 as httpx
 from fastmcp.exceptions import ToolError
 
 from cml_mcp.cml.simple_webserver.schemas.common import MACAddress, UUID4Type
